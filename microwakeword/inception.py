@@ -100,31 +100,21 @@ def conv2d_bn_delay(x,
         Output tensor after applying `Conv2D` and `BatchNormalization`.
     """
 
-    if padding == 'same' or padding == 'valid':
-        x = delay.Delay(delay=delay_val, also_in_non_streaming=True)(x)
+    if padding == 'same':
+        x = delay.Delay(delay=delay_val)(x)
 
-    if padding == 'valid':
-        x = stream.Stream(
-            cell = tf.keras.layers.Conv2D(
-            filters, kernel_size,
+
+    x = stream.Stream(
+        cell = tf.keras.layers.Conv2D(
+            filters, 
+            kernel_size,
             strides=strides,
             padding='valid',
             use_bias=use_bias),
-            use_one_step=use_one_step,
-            pad_time_dim=None,
-            pad_freq_dim='same',
-            )(x)
-    else:
-        x = stream.Stream(
-            cell = tf.keras.layers.Conv2D(
-            filters, kernel_size,
-            strides=strides,
-            padding='valid',
-            use_bias=use_bias),
-            use_one_step=use_one_step,
-            pad_time_dim=padding,
-            pad_freq_dim='same',
-            )(x)
+        use_one_step=False,
+        pad_time_dim=padding,
+        pad_freq_dim='same',
+        )(x)
     x = tf.keras.layers.BatchNormalization(scale=scale)(x)
     x = tf.keras.layers.Activation(activation)(x)
     return x
@@ -154,12 +144,6 @@ def model_parameters(parser_nn):
       default='1',
       help='Strides applied in pooling layer in the first conv block',
   )
-  parser_nn.add_argument(
-      '--cnn1_use_one_step_stream',
-      type=bool,
-      default=True,
-      help='Should the streaming convolution layer use one_step mode in the first conv block',
-  )  
   parser_nn.add_argument(
       '--cnn2_filters1',
       type=str,
@@ -233,9 +217,22 @@ def model(flags):
       parse(flags.cnn1_strides),
       parse(flags.cnn1_filters),
       parse(flags.cnn1_kernel_sizes)):
-    time_buffer_size = kernel_size-1
-    net = conv2d_bn_delay(
-        net, filters, (kernel_size, 1), padding='causal', scale=flags.bn_scale, delay_val=time_buffer_size//2, use_one_step=flags.cnn1_use_one_step_stream)
+      
+    # Streaming Conv2D with 'valid' padding
+    net = stream.Stream(
+        cell = tf.keras.layers.Conv2D(
+            filters, 
+            (kernel_size, 1),
+            padding='valid',
+            use_bias=False
+        ),
+        use_one_step=True,
+        pad_time_dim=None,
+        pad_freq_dim='same',
+        )(net)
+    net = tf.keras.layers.BatchNormalization(scale=flags.bn_scale)(net)
+    net = tf.keras.layers.Activation('relu')(net)    
+
     if stride > 1:
       net = tf.keras.layers.MaxPooling2D((3, 1), strides=(stride, 1))(net)
 
