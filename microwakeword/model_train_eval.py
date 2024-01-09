@@ -244,21 +244,21 @@ if __name__ == '__main__':
     utils.convert_model_saved(flags, 'non_stream', modes.Modes.NON_STREAM_INFERENCE)
     utils.convert_model_saved(flags, 'stream_state_internal', modes.Modes.STREAM_INTERNAL_STATE_INFERENCE)
 
-    # folder_name = 'tflite_non_stream' 
-    # file_name = 'non_stream.tflite'
-    # utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'non_stream'), os.path.join(flags.train_dir,folder_name),file_name)
-    # test.tflite_model_accuracy(flags, folder_name, file_name)
+    folder_name = 'tflite_non_stream' 
+    file_name = 'non_stream.tflite'
+    utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'non_stream'), os.path.join(flags.train_dir,folder_name),file_name)
+    test.tflite_model_accuracy(flags, folder_name, file_name)
     
-    # folder_name = 'tflite_stream_state_internal'
-    # file_name = 'stream_state_internal.tflite'
-    # # utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'stream_state_internal'), os.path.join(flags.train_dir,folder_name),file_name)
-    # # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
-    # test.tflite_model_accuracy(flags, folder_name, file_name)
+    folder_name = 'tflite_stream_state_internal'
+    file_name = 'stream_state_internal.tflite'
+    utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'stream_state_internal'), os.path.join(flags.train_dir,folder_name),file_name)
+    # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
+    test.tflite_model_accuracy(flags, folder_name, file_name)
 
     # quantize the internal streaming model here and then test it
     folder_name = 'tflite_stream_state_internal_quant'
     file_name = 'stream_state_internal_quantize.tflite'
     utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'stream_state_internal'), os.path.join(flags.train_dir,folder_name),file_name, quantize=True)
     test.tflite_model_accuracy(flags, folder_name, file_name)    
-    test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
+    # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
 
