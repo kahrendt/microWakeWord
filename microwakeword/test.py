@@ -21,9 +21,6 @@ import numpy as np
 import tensorflow as tf
 
 import microwakeword.data as input_data
-import microwakeword.inception as inception
-
-import microwakeword.utils as utils
 
 # Tests internal or external streaming tflite models (updated)
 # Can be quantized or not
@@ -96,7 +93,7 @@ def streaming_model_false_accept_rate(flags, folder, tflite_model_name, features
 
   start = 0
   end = 1
-  ignore_slices = 74
+  ignore_slices = flags.spectrogram_length
 
   while end <= features_data.shape[0]:    
     new_data_to_input = features_data[start:end,:]
@@ -126,7 +123,7 @@ def streaming_model_false_accept_rate(flags, folder, tflite_model_name, features
       
     if wake_word_detected and wakeword_probability <= 0.5:
       wake_word_detected = False
-      ignore_slices = 74
+      ignore_slices = flags.spectrogram_length
       
     if wakeword_probability > 0.5 and ignore_slices == 0:
       wake_word_detected = True
@@ -205,10 +202,11 @@ def tflite_model_accuracy(
     # can produce different results (int8 calculation)
     return output_scale * (data.astype(np.float32) - output_zero_point)
   
-  audio_processor = input_data.FeatureHandler(background_data_dir=flags.background_dir, generated_negative_data_dir=flags.generated_negative_dir, generated_positive_data_dir=flags.generated_positive_dir)
+  audio_processor = input_data.FeatureHandler(general_negative_data_dir=flags.general_negative_dir, adversarial_negative_data_dir=flags.adversarial_negative_dir, positive_data_dir=flags.positive_dir)
 
-  test_fingerprints, test_ground_truth, _ = audio_processor.get_data('testing', batch_size=flags.batch_size, features_length=74)
-
+  test_fingerprints, test_ground_truth, _ = audio_processor.get_data('testing', batch_size=flags.batch_size, features_length=flags.spectrogram_length*2-1)
+  logging.info("Testing tflite model")
+  
   true_positives = 0.0
   true_negatives = 0.0
   false_positives = 0.0
@@ -257,56 +255,13 @@ def tflite_model_accuracy(
       else:
         false_positives += 1        
                 
-      # if len(probabilities_deque) >= 5:
-      #     probabilities_deque.popleft()
-        
-      # probabilities_deque.append(wakeword_probability)
-      
-      # if input_feature_slices > 0:#1:
-      #   if end == sample_fingerprint.shape[0]:      
-
-      #     prediction = wakeword_probability > 0.5
-          
-      #     if sample_ground_truth == prediction:
-      #       if sample_ground_truth:
-      #         true_positives += 1
-      #       else:
-      #         true_negatives += 1
-      #     else:
-      #       if sample_ground_truth:
-      #         false_negatives += 1
-      #       else:
-      #         false_positives += 1
-      # else:
-      #   if (start == 4) and (i > 0):
-      #     prediction = False
-      #     for probability in probabilities_deque:
-      #       if probability > 0.5:
-      #         prediction = True
-
-      #     if test_ground_truth[i-1] == prediction:
-      #       if test_ground_truth[i-1]:
-      #         true_positives += 1
-      #       else:
-      #         true_negatives += 1
-      #     else:
-      #       if test_ground_truth[i-1]:
-      #         false_negatives += 1
-      #       else:
-      #         false_positives += 1          
-            
-      # update indexes of streamed updates
-      # start += window_stride
-      # end += window_stride            
-
-    if i >= 0: #> 0:
-      count = true_positives + true_negatives + false_positives + false_negatives
-      
-      accuracy = (true_positives + true_negatives)/count
-      recall = np.float64(true_positives)/(true_positives+false_negatives)
-      precision = np.float64(true_positives)/(true_positives+false_positives)
-      fpr = np.float64(false_positives)/(false_positives+true_negatives)
-      fnr = np.float64(false_negatives)/(false_negatives+true_positives)        
+    count = true_positives + true_negatives + false_positives + false_negatives
+    
+    accuracy = (true_positives + true_negatives)/count
+    recall = np.float64(true_positives)/(true_positives+false_negatives)
+    precision = np.float64(true_positives)/(true_positives+false_positives)
+    fpr = np.float64(false_positives)/(false_positives+true_negatives)
+    fnr = np.float64(false_negatives)/(false_negatives+true_positives)        
 
     if i % 1000 == 0 and i:
       logging.info(

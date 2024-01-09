@@ -27,15 +27,15 @@ def train(flags):
     
     logging.info(model.summary())    
     
-    data_processor = input_data.FeatureHandler(background_data_dir=flags.background_dir, generated_negative_data_dir=flags.generated_negative_dir, generated_positive_data_dir=flags.generated_positive_dir)
+    data_processor = input_data.FeatureHandler(general_negative_data_dir=flags.general_negative_dir, adversarial_negative_data_dir=flags.adversarial_negative_dir, positive_data_dir=flags.positive_dir)
     
     # Setup parameters that dictate each stage of training
     training_steps_list = list(map(int, flags.how_many_training_steps.split(',')))
     learning_rates_list = list(map(float, flags.learning_rate.split(',')))
-    background_weight_list = list(map(float, flags.background_weight.split(',')))
-    generated_negative_weight_list = list(map(float, flags.generated_negative_weight.split(',')))
-    generated_positive_weight_list = list(map(float, flags.generated_positive_weight.split(',')))
-    background_probability_list = list(map(float,flags.background_probability.split(',')))
+    general_negative_weight_list = list(map(float, flags.general_negative_weight.split(',')))
+    adversarial_negative_weight_list = list(map(float, flags.adversarial_negative_weight.split(',')))
+    positive_weight_list = list(map(float, flags.positive_weight.split(',')))
+    general_negative_probability_list = list(map(float,flags.general_negative_probability.split(',')))
     positive_probability_list = list(map(float,flags.positive_probability.split(',')))
     
 
@@ -79,17 +79,17 @@ def train(flags):
             training_steps_sum += training_steps_list[i]
             if training_step <= training_steps_sum:
                 learning_rate = learning_rates_list[i]
-                background_weight = background_weight_list[i]
-                generated_negative_weight = generated_negative_weight_list[i]
-                generated_positive_weight = generated_positive_weight_list[i]
-                background_probability = background_probability_list[i]
+                general_negative_weight = general_negative_weight_list[i]
+                adversarial_negative_weight = adversarial_negative_weight_list[i]
+                positive_weight = positive_weight_list[i]
+                general_negative_probability = general_negative_probability_list[i]
                 positive_probability = positive_probability_list[i]
                 break
 
         tf.keras.backend.set_value(model.optimizer.lr, learning_rate)
 
         train_fingerprints, train_ground_truth, train_sample_weights = data_processor.get_data(
-            'training', batch_size=flags.batch_size, features_length=flags.spectrogram_length, background_probability=background_probability, positive_probability=positive_probability, background_weight=background_weight, generated_negative_weight=generated_negative_weight, generated_positive_weight=generated_positive_weight)
+            'training', batch_size=flags.batch_size, features_length=flags.spectrogram_length, general_negative_probability=general_negative_probability, positive_probability=positive_probability, general_negative_weight=general_negative_weight, adversarial_negative_weight=adversarial_negative_weight, positive_weight=positive_weight)
         
         result = model.train_on_batch(train_fingerprints, train_ground_truth, sample_weight=train_sample_weights)
 

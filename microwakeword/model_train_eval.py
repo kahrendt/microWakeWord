@@ -28,60 +28,60 @@ from microwakeword.layers import modes
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--background_dir',
+        '--general_negative_dir',
         type=str,
         default='/tmp/speech_dataset/',
         help="""\
-        Where background negative features are stored.
+        Where general negative feature mmaps are stored.
         """)
     parser.add_argument(
-        '--generated_negative_dir',
+        '--adversarial_negative_dir',
         type=str,
         default='/tmp/speech_dataset/',
         help="""\
-        Where generated negative features are stored.
+        Where adversarial negative feature mmaps are stored.
         """)
     parser.add_argument(
-        '--generated_positive_dir',
+        '--positive_dir',
         type=str,
         default='/tmp/speech_dataset/',
         help="""\
-        Where generated positive features are stored.
-      """)
-    parser.add_argument(
-        '--background_weight',
-        type=str,
-        default=5,
-        help="""\
-        How much to weigh the background negative samples in each batch.
+        Where positive feature mmaps are stored.
         """)
     parser.add_argument(
-        '--generated_negative_weight',
+        '--general_negative_weight',
         type=str,
-        default=5,
+        default='4,4,4',
         help="""\
-        How much to weigh the generated negative samples in each batch.
+        How much to weigh the general negative samples in each batch.
         """)
     parser.add_argument(
-        '--generated_positive_weight',
+        '--adversarial_negative_weight',
         type=str,
-        default=5,
+        default='3,3,3',
         help="""\
-        How much to weigh the generated positive samples in each batch.
+        How much to weigh the adversarial negative samples in each batch.
         """)
     parser.add_argument(
-        '--background_probability',
+        '--positive_weight',
         type=str,
-        default=5,
+        default='1,1,1',
         help="""\
-        How much to weigh the generated positive samples in each batch.
+        How much to weigh the positive samples in each batch.
+        """)
+    parser.add_argument(
+        '--general_negative_probability',
+        type=str,
+        default='0.33,0.5,0.6',
+        help="""\
+        The probability that an individual sample in a batch comes from the general negative dataset.
         """)
     parser.add_argument(
         '--positive_probability',
         type=str,
-        default=5,
+        default='0.33,0.25,0.2',
         help="""\
-        How much to weigh the generated positive samples in each batch.
+        The probability that an individual sample in a batch comes from the positive dataset. 
         """)
     parser.add_argument(
         '--eval_step_interval',
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--learning_rate',
         type=str,
-        default='0.0005,0.0001,0.00002',
+        default='0.0005,0.00025,0.0001',
         help='How large a learning rate to use when training.')
     parser.add_argument(
         '--batch_size',
@@ -110,7 +110,7 @@ if __name__ == '__main__':
         '--train_dir',
         type=str,
         default='/tmp/speech_commands_train',
-        help='Directory to write event logs and checkpoint.',
+        help='Directory to write event logs, checkpoints, and saved models.',
     )    
     parser.add_argument(
         '--clip_duration_ms',
@@ -122,7 +122,7 @@ if __name__ == '__main__':
         '--sample_rate',
         type=int,
         default=16000,
-        help='Expected sample rate of the wavs',
+        help='Sample rate of the wav files used for data generation',
     )
     parser.add_argument(
         '--window_size_ms',
@@ -244,20 +244,21 @@ if __name__ == '__main__':
     utils.convert_model_saved(flags, 'non_stream', modes.Modes.NON_STREAM_INFERENCE)
     utils.convert_model_saved(flags, 'stream_state_internal', modes.Modes.STREAM_INTERNAL_STATE_INFERENCE)
 
-    folder_name = 'tflite_non_stream' 
-    file_name = 'non_stream.tflite'
-    utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'non_stream'), os.path.join(flags.train_dir,folder_name),file_name)
-    test.tflite_model_accuracy(flags, folder_name, file_name)
+    # folder_name = 'tflite_non_stream' 
+    # file_name = 'non_stream.tflite'
+    # utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'non_stream'), os.path.join(flags.train_dir,folder_name),file_name)
+    # test.tflite_model_accuracy(flags, folder_name, file_name)
     
-    folder_name = 'tflite_stream_state_internal'
-    file_name = 'stream_state_internal.tflite'
-    utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'stream_state_internal'), os.path.join(flags.train_dir,folder_name),file_name)
-    # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
-    test.tflite_model_accuracy(flags, folder_name, file_name)
+    # folder_name = 'tflite_stream_state_internal'
+    # file_name = 'stream_state_internal.tflite'
+    # # utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'stream_state_internal'), os.path.join(flags.train_dir,folder_name),file_name)
+    # # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
+    # test.tflite_model_accuracy(flags, folder_name, file_name)
 
     # quantize the internal streaming model here and then test it
     folder_name = 'tflite_stream_state_internal_quant'
     file_name = 'stream_state_internal_quantize.tflite'
     utils.convert_saved_model_to_tflite(flags, os.path.join(flags.train_dir, 'stream_state_internal'), os.path.join(flags.train_dir,folder_name),file_name, quantize=True)
-    # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
-    test.tflite_model_accuracy(flags, folder_name, file_name)
+    test.tflite_model_accuracy(flags, folder_name, file_name)    
+    test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
+

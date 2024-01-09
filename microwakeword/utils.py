@@ -307,7 +307,7 @@ def convert_saved_model_to_tflite(flags,
   if not os.path.exists(folder):
     os.makedirs(folder)
   
-  audio_processor = input_data.FeatureHandler(background_data_dir=flags.background_dir, generated_negative_data_dir=flags.generated_negative_dir, generated_positive_data_dir=flags.generated_positive_dir)
+  audio_processor = input_data.FeatureHandler(general_negative_data_dir=flags.general_negative_dir, adversarial_negative_data_dir=flags.adversarial_negative_dir, positive_data_dir=flags.positive_dir)
 
   validation_fingerprints, validation_ground_truth, _ = audio_processor.get_data('validation', batch_size=flags.batch_size, features_length=74)
   
