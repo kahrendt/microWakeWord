@@ -204,7 +204,13 @@ def tflite_model_accuracy(
   
   audio_processor = input_data.FeatureHandler(general_negative_data_dir=flags.general_negative_dir, adversarial_negative_data_dir=flags.adversarial_negative_dir, positive_data_dir=flags.positive_dir)
 
-  test_fingerprints, test_ground_truth, _ = audio_processor.get_data('testing', batch_size=flags.batch_size, features_length=flags.spectrogram_length*2-1)
+  if input_feature_slices > 1:
+    # If we have a nonstreaming model, truncate by removing the start of the spectrogram
+    test_fingerprints, test_ground_truth, _ = audio_processor.get_data('testing', batch_size=flags.batch_size, features_length=flags.spectrogram_length, truncation_strategy='truncate_start')
+  else:
+    # If a streaming model, fetch spectrograms twice the trained on length
+    # This resets the internal variable states to match the blended in background noise
+    test_fingerprints, test_ground_truth, _ = audio_processor.get_data('testing', batch_size=flags.batch_size, features_length=flags.spectrogram_length*2, truncation_strategy='truncate_start')
   logging.info("Testing tflite model")
   
   true_positives = 0.0

@@ -128,7 +128,7 @@ def train(flags):
 
         is_last_step = (training_step == training_steps_max)
         if (training_step % flags.eval_step_interval) == 0 or is_last_step:
-            validation_fingerprints, validation_ground_truth, validation_sample_weights = data_processor.get_data('validation', batch_size=flags.batch_size, features_length=flags.spectrogram_length)
+            validation_fingerprints, validation_ground_truth, validation_sample_weights = data_processor.get_data('validation', batch_size=flags.batch_size, features_length=flags.spectrogram_length, truncation_strategy='truncate_start')
 
             for i in range(0, len(validation_fingerprints), flags.batch_size):
                 result = model.test_on_batch(validation_fingerprints[i : i+flags.batch_size], validation_ground_truth[i : i+flags.batch_size], reset_metrics=(i==0))
@@ -185,7 +185,7 @@ def train(flags):
             logging.info('So far the best low false positive rate is %.2f%% with false negative rate of %.2f%%',
                         (best_fpr * 100), (best_fnr * 100))
 
-    testing_fingerprints, testing_ground_truth, testing_sample_weights = data_processor.get_data('testing', batch_size=flags.batch_size, features_length=flags.spectrogram_length)
+    testing_fingerprints, testing_ground_truth, _ = data_processor.get_data('testing', batch_size=flags.batch_size, features_length=flags.spectrogram_length, truncation_strategy='truncate_start')
 
     for i in range(0, len(validation_fingerprints), flags.batch_size):
         result = model.test_on_batch(testing_fingerprints[i: i+flags.batch_size], testing_ground_truth[i : i+flags.batch_size], reset_metrics=(i==0))

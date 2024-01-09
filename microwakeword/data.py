@@ -49,7 +49,7 @@ class FeatureHandler(object):
     def set_size(self, mode):
         return len(self.data_index[mode])
     
-    def get_truncated_features(self, mode, type, index, features_length):
+    def get_truncated_features(self, mode, type, index, features_length, truncation_strategy='random'):
         if type == 'background':
             candidates = self.general_negative_data_index[mode]
             sample = candidates[index]
@@ -67,13 +67,22 @@ class FeatureHandler(object):
         
         # If the spectrogram is longer than the training shape, we randomly choose a subset
         if (data_length > features_length):
-            features_offset = np.random.randint(0, data_length - features_length)
+            if truncation_strategy == 'random':
+                features_offset = np.random.randint(0, data_length - features_length)
+            elif truncation_strategy == 'none':
+                # return the entire spectrogram
+                features_offset = 0
+                features_length = data_length
+            elif truncation_strategy == 'truncate_start':
+                features_offset = data_length - features_length
+            elif truncation_strategy == 'truncate_end':
+                features_offset = 0
         else:
             features_offset = 0
         
         return numpy_features[features_offset:(features_offset+features_length)]        
     
-    def get_random_features_for_type(self, mode, type, features_length):
+    def get_random_features_for_type(self, mode, type, features_length, truncation_strategy):
         if type == 'background':
             data_size = len(self.general_negative_data_index[mode])
         elif type == 'adversarial_negative_':
@@ -83,9 +92,9 @@ class FeatureHandler(object):
             
         sample_index = np.random.randint(0, data_size)
         
-        return self.get_truncated_features(mode, type, sample_index, features_length)
+        return self.get_truncated_features(mode, type, sample_index, features_length, truncation_strategy=truncation_strategy)
 
-    def get_data(self, mode, batch_size, features_length, general_negative_weight=1.0, adversarial_negative_weight=1.0, positive_weight=1.0, general_negative_probability=0.3, positive_probability=0.5):
+    def get_data(self, mode, batch_size, features_length, general_negative_weight=1.0, adversarial_negative_weight=1.0, positive_weight=1.0, general_negative_probability=0.3, positive_probability=0.5, truncation_strategy='random'):
         # candidates = self.data_index[mode]
         
         # spectrogram_shape = (features_length, 40)
@@ -155,32 +164,32 @@ class FeatureHandler(object):
             
             for i in range(0, sample_count):
                 if random_prob[i] < general_negative_probability:
-                    data[i] = self.get_random_features_for_type(mode, 'background', features_length)
+                    data[i] = self.get_random_features_for_type(mode, 'background', features_length, truncation_strategy=truncation_strategy)
                     labels[i] = False
                     weights[i] = general_negative_weight
                 elif random_prob[i] < (general_negative_probability+positive_probability):
-                    data[i] = self.get_random_features_for_type(mode, 'positive', features_length)
+                    data[i] = self.get_random_features_for_type(mode, 'positive', features_length, truncation_strategy=truncation_strategy)
                     labels[i] = True
                     weights[i] = positive_weight
                 else:
-                    data[i] = self.get_random_features_for_type(mode, 'adversarial_negative_', features_length)
+                    data[i] = self.get_random_features_for_type(mode, 'adversarial_negative_', features_length, truncation_strategy=truncation_strategy)
                     labels[i] = False
                     weights[i] = adversarial_negative_weight
         else:
             for index in range(len(general_negative_candidates)):
-                data[index] = self.get_truncated_features(mode, 'background', index, features_length)
+                data[index] = self.get_truncated_features(mode, 'background', index, features_length, truncation_strategy=truncation_strategy)
                 labels[index] = False
                 weights[index] = general_negative_weight
             for index in range(len(adversarial_negative_candidates)):
                 offset_index = index + len(general_negative_candidates)
                 
-                data[offset_index] = self.get_truncated_features(mode, 'adversarial_negative_', index, features_length)
+                data[offset_index] = self.get_truncated_features(mode, 'adversarial_negative_', index, features_length, truncation_strategy=truncation_strategy)
                 labels[offset_index] = False
                 weights[offset_index] = adversarial_negative_weight
             for index in range(len(positive_candidates)):
                 offset_index = index + len(general_negative_candidates) + len(adversarial_negative_candidates)
                 
-                data[offset_index] = self.get_truncated_features(mode, 'positive', index, features_length)
+                data[offset_index] = self.get_truncated_features(mode, 'positive', index, features_length, truncation_strategy=truncation_strategy)
                 labels[offset_index] = True
                 weights[offset_index] = positive_weight
             
