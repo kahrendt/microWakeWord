@@ -43,6 +43,8 @@ def streaming_model_false_accept_rate(flags, folder, tflite_model_name, features
     window_stride = 1
 
     false_accept_count = 0
+    probabilities_sliding_window_size = 10
+    probability_threshold = 0.5
 
     for s in range(len(input_details)):
         if is_quantized_model:
@@ -104,8 +106,9 @@ def streaming_model_false_accept_rate(flags, folder, tflite_model_name, features
 
     start = 0
     end = 1
-    ignore_slices = flags.spectrogram_length
-
+    ignore_after_positive = flags.spectrogram_length
+    running_probability = []
+    false_accept = 0
     while end <= features_data.shape[0]:
         new_data_to_input = features_data[start:end, :]
 
@@ -138,31 +141,50 @@ def streaming_model_false_accept_rate(flags, folder, tflite_model_name, features
             )
         else:
             wakeword_probability = output[0][0]
+            
+        running_probability.append(wakeword_probability)
+    
+    def running_average_detection(window_probabilities, threshold):
+        return np.average(window_probabilities) > threshold
+    
+    for index in range(0, len(running_probability)):
+        if ignore_after_positive > 0:
+            ignore_after_positive -= 1
+        else:
+            detected = running_average_detection(running_probability[index-probabilities_sliding_window_size:index], probability_threshold)
+            
+            if detected:
+                ignore_after_positive = flags.spectrogram_length
 
-        if wake_word_detected and wakeword_probability <= 0.5:
-            wake_word_detected = False
-            ignore_slices = flags.spectrogram_length
+                false_accept += 1
 
-        if wakeword_probability > 0.5 and ignore_slices == 0:
-            wake_word_detected = True
-            false_accept_count += 1
 
-        if ignore_slices > 0:
-            ignore_slices -= 1
+        # if wake_word_detected and wakeword_probability <= 0.5:
+        #     wake_word_detected = False
+        #     ignore_slices = flags.spectrogram_length
 
-        if not start % 50000:
-            logging.info(
-                "DipCo false accepts = %d; false accepts per hour = %f",
-                *(false_accept_count, false_accept_count / (start * 0.02 / 3600))
-            )
+        # if wakeword_probability > 0.5 and ignore_slices == 0:
+        #     wake_word_detected = True
+        #     false_accept_count += 1
+
+        # if ignore_slices > 0:
+        #     ignore_slices -= 1
+
+        # if not start % 50000:
+        #     logging.info(
+        #         "DipCo false accepts = %d; false accepts per hour = %f",
+        #         *(false_accept_count, false_accept_count / (start * 0.02 / 3600))
+            # )
 
     logging.info(
         "DipCo Total False Accepts = %d; total false accepts per hour = %f",
         *(
-            false_accept_count,
-            false_accept_count / (features_data.shape[0] * 0.02 / 3600.0),
+            false_accept,
+            false_accept / (features_data.shape[0] * 0.02 / 3600.0),
         )
     )
+    
+    return false_accept / (features_data.shape[0] * 0.02 / 3600.0)
 
 def tf_model_accuracy(
     flags,
@@ -260,6 +282,7 @@ def tflite_model_accuracy(
     folder,
     tflite_model_name="stream_state_internal.tflite",
     accuracy_name="tflite_model_accuracy.txt",
+    data_set='testing',
 ):
     interpreter = tf.lite.Interpreter(
         model_path=os.path.join(flags.train_dir, folder, tflite_model_name)
@@ -332,10 +355,10 @@ def tflite_model_accuracy(
         positive_data_dir=flags.positive_dir,
     )
 
-    if input_feature_slices > 1:
+    if input_feature_slices > 1 or data_set == 'validation':
         # If we have a nonstreaming model, truncate by removing the start of the spectrogram
         test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
-            "testing",
+            data_set,
             batch_size=flags.batch_size,
             features_length=flags.spectrogram_length,
             truncation_strategy="truncate_start",
@@ -344,7 +367,7 @@ def tflite_model_accuracy(
         # If a streaming model, fetch spectrograms twice the trained on length
         # This resets the internal variable states to match the blended in background noise
         test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
-            "testing",
+            data_set,
             batch_size=flags.batch_size,
             features_length=flags.spectrogram_length * 2,
             truncation_strategy="truncate_start",
@@ -416,21 +439,35 @@ def tflite_model_accuracy(
         count = true_positives + true_negatives + false_positives + false_negatives
 
         accuracy = (true_positives + true_negatives) / count
-        recall = np.float64(true_positives) / (true_positives + false_negatives)
-        precision = np.float64(true_positives) / (true_positives + false_positives)
-        fpr = np.float64(false_positives) / (false_positives + true_negatives)
-        fnr = np.float64(false_negatives) / (false_negatives + true_positives)
+        
+        if (true_positives+false_positives) > 0:
+            recall = np.float64(true_positives) / (true_positives + false_negatives)
+            fnr = np.float64(false_negatives) / (false_negatives + true_positives)
+        else:
+            recall = 0.0
+            fnr = 1.0
+        
+        if (true_positives+false_positives) > 0:
+            precision = np.float64(true_positives) / (true_positives + false_positives)
+        else:
+            precision = 0.0
+        
+        if (false_positives+true_negatives) > 0:    
+            fpr = np.float64(false_positives) / (false_positives + true_negatives)
+        else:
+            fpr = 1.0
+        
 
-        if i % 1000 == 0 and i:
-            logging.info(
-                "tflite model test: accuracy = %f; recall = %f; precision = %f; fpr = %f; fnr = %f; %d out of %d",
-                *(accuracy, recall, precision, fpr, fnr, i, len(test_fingerprints))
-            )
+    #     if i % 1000 == 0 and i:
+    #         logging.info(
+    #             "tflite model test: accuracy = %f; recall = %f; precision = %f; fpr = %f; fnr = %f; %d out of %d",
+    #             *(accuracy, recall, precision, fpr, fnr, i, len(test_fingerprints))
+    #         )
 
-    logging.info(
-        "true positives %d, true negatives %d, false positives %d, false negatives %d",
-        *(true_positives, true_negatives, false_positives, false_negatives)
-    )
+    # logging.info(
+    #     "true positives %d, true negatives %d, false positives %d, false negatives %d",
+    #     *(true_positives, true_negatives, false_positives, false_negatives)
+    # )
     logging.info(
         "Final tflite model test: accuracy = %f%%; recall = %f%%; precision = %f%%; fpr = %f%%; fnr = %f%%; (N=%d)",
         *(
@@ -446,4 +483,6 @@ def tflite_model_accuracy(
     path = os.path.join(flags.train_dir, folder)
     with open(os.path.join(path, accuracy_name), "wt") as fd:
         fd.write("%f on set_size %d" % (accuracy * 100, len(test_fingerprints)))
-    return accuracy * 100
+    
+    return accuracy, recall, precision, fpr, fnr
+    # return accuracy * 100

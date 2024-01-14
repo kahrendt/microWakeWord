@@ -11,6 +11,9 @@ import microwakeword.data as input_data
 import microwakeword.inception as inception
 import microwakeword.utils as utils
 
+import microwakeword.test as test
+import microwakeword.layers.modes as modes
+
 
 def compute_false_rates(
     true_positives, true_negatives, false_positives, false_negatives
@@ -23,6 +26,47 @@ def compute_false_rates(
     )
 
     return false_positive_rate, false_negative_rate
+
+
+def validate_streaming(flags):
+    old_batch_size = flags.batch_size
+    utils.convert_model_saved(
+        flags,
+        "stream_state_internal",
+        modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
+        weights_name="last_weights",
+    )
+
+    folder_name = "tflite_stream_state_internal"
+    file_name = "stream_state_internal.tflite"
+    utils.convert_saved_model_to_tflite(
+        flags,
+        os.path.join(flags.train_dir, "stream_state_internal"),
+        os.path.join(flags.train_dir, folder_name),
+        file_name,
+    )
+
+    flags.batch_size = old_batch_size
+
+    false_accepts_per_hour = test.streaming_model_false_accept_rate(
+        flags, folder_name, file_name, "dipco_features.npy"
+    )
+    (
+        accuracy,
+        recall,
+        precision,
+        false_positive_rate,
+        false_negative_rate,
+    ) = test.tflite_model_accuracy(flags, folder_name, file_name, data_set="validation")
+
+    return {
+        "false_accepts_per_hour": false_accepts_per_hour,
+        "accuracy": accuracy,
+        "recall": recall,
+        "precision": precision,
+        "false_positive_rate": false_positive_rate,
+        "false_negative_rate": false_negative_rate,
+    }
 
 
 def train(flags):
@@ -89,7 +133,7 @@ def train(flags):
 
     training_steps_max = np.sum(training_steps_list)
 
-    best_fpr = 1.0
+    best_false_accept_per_hour = 1000.0
     best_fnr = 1.0
 
     results_deque = deque([])
@@ -176,75 +220,81 @@ def train(flags):
 
         is_last_step = training_step == training_steps_max
         if (training_step % flags.eval_step_interval) == 0 or is_last_step:
-            (
-                validation_fingerprints,
-                validation_ground_truth,
-                validation_sample_weights,
-            ) = data_processor.get_data(
-                "validation",
-                batch_size=flags.batch_size,
-                features_length=flags.spectrogram_length,
-                truncation_strategy="truncate_start",
-            )
+            model.save_weights(os.path.join(flags.train_dir, "last_weights"))
+            validation_metrics = validate_streaming(flags)
+            # (
+            #     validation_fingerprints,
+            #     validation_ground_truth,
+            #     validation_sample_weights,
+            # ) = data_processor.get_data(
+            #     "validation",
+            #     batch_size=flags.batch_size,
+            #     features_length=flags.spectrogram_length,
+            #     truncation_strategy="truncate_start",
+            # )
 
-            for i in range(0, len(validation_fingerprints), flags.batch_size):
-                result = model.test_on_batch(
-                    validation_fingerprints[i : i + flags.batch_size],
-                    validation_ground_truth[i : i + flags.batch_size],
-                    reset_metrics=(i == 0),
-                )
+            # for i in range(0, len(validation_fingerprints), flags.batch_size):
+            #     result = model.test_on_batch(
+            #         validation_fingerprints[i : i + flags.batch_size],
+            #         validation_ground_truth[i : i + flags.batch_size],
+            #         reset_metrics=(i == 0),
+            #     )
 
-            loss = result[0]
-            accuracy = result[1]
-            recall = result[2]
-            precision = result[3]
-            true_positives = result[4]
-            false_positives = result[5]
-            true_negatives = result[6]
-            false_negatives = result[7]
+            # loss = result[0]
+            # accuracy = result[1]
+            # recall = result[2]
+            # precision = result[3]
+            # true_positives = result[4]
+            # false_positives = result[5]
+            # true_negatives = result[6]
+            # false_negatives = result[7]
 
-            count = true_positives + false_positives + true_negatives + false_negatives
+            # count = true_positives + false_positives + true_negatives + false_negatives
 
-            false_positive_rate, false_negative_rate = compute_false_rates(
-                true_positives, true_negatives, false_positives, false_negatives
-            )
+            # false_positive_rate, false_negative_rate = compute_false_rates(
+            #     true_positives, true_negatives, false_positives, false_negatives
+            # )
 
             logging.info(
-                "Step %d: Validation accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%% (N=%d)",
+                "Step %d: Validation accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, false accepts per hour = %.2f",
                 *(
                     training_step,
-                    accuracy * 100,
-                    recall * 100,
-                    precision * 100,
-                    false_positive_rate * 100,
-                    false_negative_rate * 100,
-                    count,
+                    validation_metrics['accuracy'] * 100,
+                    validation_metrics['recall'] * 100,
+                    validation_metrics['precision'] * 100,
+                    validation_metrics['false_positive_rate'] * 100,
+                    validation_metrics['false_negative_rate'] * 100,
+                    validation_metrics['false_accepts_per_hour'],
                 )
             )
 
             with validation_writer.as_default():
-                tf.summary.scalar("loss", loss, step=training_step)
-                tf.summary.scalar("accuracy", accuracy, step=training_step)
-                tf.summary.scalar("recall", recall, step=training_step)
-                tf.summary.scalar("precision", precision, step=training_step)
-                tf.summary.scalar("fpr", false_positive_rate, step=training_step)
-                tf.summary.scalar("fnr", false_negative_rate, step=training_step)
+                # tf.summary.scalar("loss", loss, step=training_step)
+                tf.summary.scalar("accuracy", validation_metrics['accuracy'] , step=training_step)
+                tf.summary.scalar("recall", validation_metrics['recall'], step=training_step)
+                tf.summary.scalar("precision", validation_metrics['precision'], step=training_step)
+                tf.summary.scalar("fpr", validation_metrics['false_positive_rate'], step=training_step)
+                tf.summary.scalar("fnr", validation_metrics['false_negative_rate'], step=training_step)
+                tf.summary.scalar("faph", validation_metrics['false_accepts_per_hour'], step=training_step)
                 validation_writer.flush()
 
             model.save_weights(
                 os.path.join(
                     flags.train_dir,
                     "train/",
-                    str(int(best_fpr * 10000)) + "weights_" + str(training_step),
+                    str(int(best_false_accept_per_hour * 10000)) + "weights_" + str(training_step),
                 )
             )
 
+            false_accepts_rate = validation_metrics['false_accepts_per_hour']
             # Save the model checkpoint when validation accuracy improves
-            if (false_positive_rate < best_fpr) or (false_positive_rate < flags.target_fpr):
-                if false_positive_rate < flags.target_fpr:
-                    if false_negative_rate < best_fnr:
-                        best_fpr = false_positive_rate
-                        best_fnr = false_negative_rate
+            if (false_accepts_rate < best_false_accept_per_hour) or (
+                false_accepts_rate < flags.target_fpr
+            ):
+                if false_accepts_rate < flags.target_fpr:
+                    if (validation_metrics['false_negative_rate'] < best_fnr):
+                        best_false_accept_per_hour = false_accepts_rate
+                        best_fnr = validation_metrics['false_negative_rate']
 
                         # overwrite the best model weights
                         model.save_weights(
@@ -252,16 +302,16 @@ def train(flags):
                         )
                         checkpoint.save(file_prefix=checkpoint_prefix)
                 else:
-                    best_fpr = false_positive_rate
-                    best_fnr = false_negative_rate
+                    best_false_accept_per_hour = false_accepts_rate
+                    best_fnr = validation_metrics['false_negative_rate']
 
                     # overwrite the best model weights
                     model.save_weights(os.path.join(flags.train_dir, "best_weights"))
                     checkpoint.save(file_prefix=checkpoint_prefix)
 
             logging.info(
-                "So far the best low false positive rate is %.2f%% with false negative rate of %.2f%%",
-                (best_fpr * 100),
+                "So far the best low false accepts per hour rate is %.2f with false negative rate of %.2f%%",
+                best_false_accept_per_hour,
                 (best_fnr * 100),
             )
 

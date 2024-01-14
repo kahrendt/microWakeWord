@@ -259,7 +259,7 @@ def to_streaming_inference(model_non_stream, flags, mode):
     Returns:
       Keras inference model of inference_type
     """
-    tf.keras.backend.set_learning_phase(0)
+    # tf.keras.backend.set_learning_phase(0)
     input_data_shape = modes.get_input_data_shape(flags, mode)
 
     # get input data type and use it for input streaming type
