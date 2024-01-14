@@ -93,6 +93,14 @@ if __name__ == "__main__":
         """,
     )
     parser.add_argument(
+        "--target_fpr",
+        type=float,
+        default="0.025",
+        help="""\
+        The maximum acceptable false positive rate.
+        """,
+    )
+    parser.add_argument(
         "--eval_step_interval",
         type=int,
         default=500,
@@ -254,6 +262,9 @@ if __name__ == "__main__":
     utils.convert_model_saved(
         flags, "stream_state_internal", modes.Modes.STREAM_INTERNAL_STATE_INFERENCE
     )
+    
+    folder_name = "non_stream"
+    test.tf_model_accuracy(flags, folder_name)
 
     folder_name = "tflite_non_stream"
     file_name = "non_stream.tflite"
@@ -287,4 +298,4 @@ if __name__ == "__main__":
         quantize=True,
     )
     test.tflite_model_accuracy(flags, folder_name, file_name)
-    # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
+    test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')

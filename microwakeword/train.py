@@ -240,8 +240,8 @@ def train(flags):
             )
 
             # Save the model checkpoint when validation accuracy improves
-            if (false_positive_rate < best_fpr) or (false_positive_rate < 0.025):
-                if false_positive_rate < 0.025:
+            if (false_positive_rate < best_fpr) or (false_positive_rate < flags.target_fpr):
+                if false_positive_rate < flags.target_fpr:
                     if false_negative_rate < best_fnr:
                         best_fpr = false_positive_rate
                         best_fnr = false_negative_rate
@@ -272,7 +272,7 @@ def train(flags):
         truncation_strategy="truncate_start",
     )
 
-    for i in range(0, len(validation_fingerprints), flags.batch_size):
+    for i in range(0, len(testing_fingerprints), flags.batch_size):
         result = model.test_on_batch(
             testing_fingerprints[i : i + flags.batch_size],
             testing_ground_truth[i : i + flags.batch_size],

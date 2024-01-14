@@ -20,6 +20,7 @@ from absl import logging
 import numpy as np
 import tensorflow as tf
 
+import microwakeword.inception as inception
 import microwakeword.data as input_data
 
 # Tests internal or external streaming tflite models (updated)
@@ -163,6 +164,96 @@ def streaming_model_false_accept_rate(flags, folder, tflite_model_name, features
         )
     )
 
+def tf_model_accuracy(
+    flags,
+    folder,
+    accuracy_name="tf_model_accuracy.txt",
+    weights_name="best_weights",
+):
+    def compute_false_rates(
+    true_positives, true_negatives, false_positives, false_negatives
+    ):
+        false_positive_rate = np.float64(false_positives) / (
+            false_positives + true_negatives
+        )
+        false_negative_rate = np.float64(false_negatives) / (
+            true_positives + false_negatives
+        )
+
+        return false_positive_rate, false_negative_rate
+
+    audio_processor = input_data.FeatureHandler(
+        general_negative_data_dir=flags.general_negative_dir,
+        adversarial_negative_data_dir=flags.adversarial_negative_dir,
+        positive_data_dir=flags.positive_dir,
+    )
+    
+    test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
+        "testing",
+        batch_size=flags.batch_size,
+        features_length=flags.spectrogram_length,
+        truncation_strategy="truncate_start",
+    )
+    
+    model = tf.saved_model.load(os.path.join(flags.train_dir, folder))
+    inference_batch_size = 1
+    
+    true_positives = 0
+    true_negatives = 0
+    false_positives = 0
+    false_negatives = 0
+    
+    for i in range(0, len(test_fingerprints), inference_batch_size):
+        spectrogram_features = test_fingerprints[i : i + inference_batch_size]
+        sample_ground_truth = test_ground_truth[i]
+        result = model(tf.convert_to_tensor(spectrogram_features, dtype=tf.float32))
+        
+        prediction = result.numpy()[0][0] > 0.5
+        if sample_ground_truth == prediction:
+            if sample_ground_truth:
+                true_positives += 1
+            else:
+                true_negatives += 1
+        else:
+            if sample_ground_truth:
+                false_negatives += 1
+            else:
+                false_positives += 1
+
+        count = true_positives + true_negatives + false_positives + false_negatives
+
+        accuracy = (true_positives + true_negatives) / count
+        recall = np.float64(true_positives) / (true_positives + false_negatives)
+        precision = np.float64(true_positives) / (true_positives + false_positives)
+        fpr = np.float64(false_positives) / (false_positives + true_negatives)
+        fnr = np.float64(false_negatives) / (false_negatives + true_positives)
+
+        if i % 1000 == 0 and i:
+            logging.info(
+                "TensorFlow model test: accuracy = %f; recall = %f; precision = %f; fpr = %f; fnr = %f; %d out of %d",
+                *(accuracy, recall, precision, fpr, fnr, i, len(test_fingerprints))
+            )
+
+    false_positive_rate, false_negative_rate = compute_false_rates(
+        true_positives, true_negatives, false_positives, false_negatives
+    )    
+    
+    logging.info(
+        "Final TensorFlow model test: accuracy = %f%%; recall = %f%%; precision = %f%%; fpr = %f%%; fnr = %f%%; (N=%d)",
+        *(
+            accuracy * 100,
+            recall * 100,
+            precision * 100,
+            false_positive_rate * 100,
+            false_negative_rate * 100,
+            len(test_fingerprints),
+        )
+    )
+
+    path = os.path.join(flags.train_dir, folder)
+    with open(os.path.join(path, accuracy_name), "wt") as fd:
+        fd.write("%f on set_size %d" % (accuracy * 100, len(test_fingerprints)))
+    return accuracy * 100
 
 def tflite_model_accuracy(
     flags,
