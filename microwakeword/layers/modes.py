@@ -37,11 +37,11 @@ class Modes(object):
     NON_STREAM_INFERENCE = "NON_STREAM_INFERENCE"
 
 
-def get_input_data_shape(flags, mode):
+def get_input_data_shape(config, mode):
     """Gets data shape for a neural net input layer.
 
     Args:
-      flags: command line flags, descibed at base_parser.py
+      config: dictionary containing training parameters
       mode: inference mode described above at Modes
 
     Returns:
@@ -54,54 +54,10 @@ def get_input_data_shape(flags, mode):
         Modes.STREAM_INTERNAL_STATE_INFERENCE,
         Modes.STREAM_EXTERNAL_STATE_INFERENCE,
     ):
-        raise ValueError('Unknown mode "%s" ' % flags.mode)
+        raise ValueError('Unknown mode "%s" ' % config["mode"])
 
-    if flags.preprocess == "custom":
-        # it is a special case to customize input data shape
-        # and use model on its own (for debugging only)
-        data_shape = flags.data_shape
-    elif flags.preprocess == "raw":
-        if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
-            data_shape = (flags.desired_samples,)
-        else:
-            # number of input audio samples required to produce one output frame
-            framing_stride = flags.window_stride_samples
-
-            # data_stride is for streaming with stride/pool
-            data_shape = (framing_stride * flags.data_stride,)
-    elif flags.preprocess == "mfcc":
-        if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
-            data_shape = (
-                flags.spectrogram_length,
-                flags.dct_num_features,
-            )
-        else:
-            data_shape = (
-                1,
-                flags.dct_num_features,
-            )  # streaming
-    elif flags.preprocess == "micro":
-        if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
-            data_shape = (
-                flags.spectrogram_length,
-                flags.mel_num_bins,
-            )
-        else:
-            data_shape = (
-                1,
-                flags.mel_num_bins,
-            )  # streaming
-    elif flags.preprocess == "none":
-        if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
-            data_shape = (
-                flags.spectrogram_length,
-                flags.mel_num_bins,
-            )
-        else:
-            data_shape = (
-                1,
-                flags.mel_num_bins,
-            )  # streaming
+    if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
+        data_shape = (config["spectrogram_length"], 40)
     else:
-        raise ValueError('Unknown preprocess mode "%s"' % flags.preprocess)
+        data_shape = (1, 40)
     return data_shape

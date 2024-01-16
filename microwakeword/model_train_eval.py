@@ -17,6 +17,7 @@
 import argparse
 import json
 import os
+import yaml
 from absl import logging
 
 import microwakeword.inception as inception
@@ -29,142 +30,18 @@ from microwakeword.layers import modes
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--general_negative_dir",
+        "--training_config",
         type=str,
-        default="/tmp/speech_dataset/",
+        default="trained_models/model/training_parameters.yaml",
         help="""\
-        Where general negative feature mmaps are stored.
+        Path to the training parameters yaml configuration.action=
         """,
-    )
-    parser.add_argument(
-        "--adversarial_negative_dir",
-        type=str,
-        default="/tmp/speech_dataset/",
-        help="""\
-        Where adversarial negative feature mmaps are stored.
-        """,
-    )
-    parser.add_argument(
-        "--positive_dir",
-        type=str,
-        default="/tmp/speech_dataset/",
-        help="""\
-        Where positive feature mmaps are stored.
-        """,
-    )
-    parser.add_argument(
-        "--general_negative_weight",
-        type=str,
-        default="4,4,4",
-        help="""\
-        How much to weigh the general negative samples in each batch.
-        """,
-    )
-    parser.add_argument(
-        "--adversarial_negative_weight",
-        type=str,
-        default="3,3,3",
-        help="""\
-        How much to weigh the adversarial negative samples in each batch.
-        """,
-    )
-    parser.add_argument(
-        "--positive_weight",
-        type=str,
-        default="1,1,1",
-        help="""\
-        How much to weigh the positive samples in each batch.
-        """,
-    )
-    parser.add_argument(
-        "--general_negative_probability",
-        type=str,
-        default="0.33,0.5,0.6",
-        help="""\
-        The probability that an individual sample in a batch comes from the general negative dataset.
-        """,
-    )
-    parser.add_argument(
-        "--positive_probability",
-        type=str,
-        default="0.33,0.25,0.2",
-        help="""\
-        The probability that an individual sample in a batch comes from the positive dataset. 
-        """,
-    )
-    parser.add_argument(
-        "--target_fpr",
-        type=float,
-        default="0.025",
-        help="""\
-        The maximum acceptable false positive rate.
-        """,
-    )
-    parser.add_argument(
-        "--eval_step_interval",
-        type=int,
-        default=500,
-        help="How often to evaluate the training results.",
-    )
-    parser.add_argument(
-        "--how_many_training_steps",
-        type=str,
-        default="10000,10000,10000",
-        help="How many training loops to run",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=str,
-        default="0.0005,0.00025,0.0001",
-        help="How large a learning rate to use when training.",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=100,
-        help="How many items to train with at once",
-    )
-    parser.add_argument(
-        "--train_dir",
-        type=str,
-        default="/tmp/speech_commands_train",
-        help="Directory to write event logs, checkpoints, and saved models.",
-    )
-    parser.add_argument(
-        "--clip_duration_ms",
-        type=int,
-        default=1000,
-        help="Expected duration in milliseconds of the input wavs",
-    )
-    parser.add_argument(
-        "--sample_rate",
-        type=int,
-        default=16000,
-        help="Sample rate of the wav files used for data generation",
-    )
-    parser.add_argument(
-        "--window_size_ms",
-        type=float,
-        default=30.0,
-        help="How long each spectrogram timeslice is.",
-    )
-    parser.add_argument(
-        "--window_stride_ms",
-        type=float,
-        default=20.0,
-        help="How far to move in time between spectrogram timeslices.",
     )
     parser.add_argument(
         "--train",
         type=int,
         default=1,
         help="If 1 run train and test, else run only test",
-    )
-    parser.add_argument(
-        "--mel_num_bins",
-        type=int,
-        default=40,
-        help="How many bands in the resulting mel spectrum.",
     )
     parser.add_argument(
         "--restore_checkpoint",
@@ -223,79 +100,90 @@ if __name__ == "__main__":
     if unparsed:
         raise ValueError("Unknown argument: {}".format(unparsed))
 
-    flags.summaries_dir = os.path.join(flags.train_dir, "logs/")
+    config = yaml.load(open(flags.training_config, "r").read(), yaml.Loader)
 
-    desired_samples = int(flags.sample_rate * flags.clip_duration_ms / 1000)
-    window_size_samples = int(flags.sample_rate * flags.window_size_ms / 1000)
-    window_stride_samples = int(flags.sample_rate * flags.window_stride_ms / 1000)
+    config["summaries_dir"] = os.path.join(config["train_dir"], "logs/")
+
+    desired_samples = int(config["sample_rate"] * config["clip_duration_ms"] / 1000)
+    window_size_samples = int(config["sample_rate"] * config["window_size_ms"] / 1000)
+    window_stride_samples = int(
+        config["sample_rate"] * config["window_stride_ms"] / 1000
+    )
     length_minus_window = desired_samples - window_size_samples
     if length_minus_window < 0:
-        flags.spectrogram_length = 0
+        config["spectrogram_length"] = 0
     else:
-        flags.spectrogram_length = 1 + int(length_minus_window / window_stride_samples)
-
-    flags.preprocess = "micro"
+        config["spectrogram_length"] = 1 + int(
+            length_minus_window / window_stride_samples
+        )
 
     if flags.train:
         try:
-            os.makedirs(flags.train_dir)
-            os.makedirs(os.path.join(flags.train_dir, "restore"))  # DO I USE THIS?
-            os.mkdir(flags.summaries_dir)
+            os.makedirs(config["train_dir"])
+            os.makedirs(os.path.join(config["train_dir"], "restore"))  # DO I USE THIS?
+            os.mkdir(config["summaries_dir"])
         except OSError as e:
             if flags.restore_checkpoint:
                 pass
             else:
                 raise ValueError(
-                    "model already exists in folder %s" % flags.train_dir
+                    "model already exists in folder %s" % config["train_dir"]
                 ) from None
 
-        train.train(flags)
+        train.train(flags, config)
     else:
-        if not os.path.isdir(flags.train_dir):
+        if not os.path.isdir(config["train_dir"]):
             raise ValueError('model is not trained set "--train 1" and retrain it')
 
-    # write all flags settings into json
-    with open(os.path.join(flags.train_dir, "flags.json"), "wt") as f:
+    # write all flags settings into json TODO Switch to saving config.yaml?
+    with open(os.path.join(config["train_dir"], "flags.json"), "wt") as f:
         json.dump(flags.__dict__, f)
 
-    utils.convert_model_saved(flags, "non_stream", modes.Modes.NON_STREAM_INFERENCE)
     utils.convert_model_saved(
-        flags, "stream_state_internal", modes.Modes.STREAM_INTERNAL_STATE_INFERENCE
+        flags, config, "non_stream", modes.Modes.NON_STREAM_INFERENCE
     )
-    
+    utils.convert_model_saved(
+        flags,
+        config,
+        "stream_state_internal",
+        modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
+    )
+
     folder_name = "non_stream"
-    test.tf_model_accuracy(flags, folder_name)
+    test.tf_model_accuracy(config, folder_name)
 
     folder_name = "tflite_non_stream"
     file_name = "non_stream.tflite"
     utils.convert_saved_model_to_tflite(
-        flags,
-        os.path.join(flags.train_dir, "non_stream"),
-        os.path.join(flags.train_dir, folder_name),
+        config,
+        os.path.join(config["train_dir"], "non_stream"),
+        os.path.join(config["train_dir"], folder_name),
         file_name,
     )
-    test.tflite_model_accuracy(flags, folder_name, file_name)
+    test.tflite_model_accuracy(config, folder_name, file_name)
 
     folder_name = "tflite_stream_state_internal"
     file_name = "stream_state_internal.tflite"
     utils.convert_saved_model_to_tflite(
-        flags,
-        os.path.join(flags.train_dir, "stream_state_internal"),
-        os.path.join(flags.train_dir, folder_name),
+        config,
+        os.path.join(config["train_dir"], "stream_state_internal"),
+        os.path.join(config["train_dir"], folder_name),
         file_name,
     )
-    # test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
-    test.tflite_model_accuracy(flags, folder_name, file_name)
+    test.tflite_model_accuracy(config, folder_name, file_name)
+    # test.streaming_model_false_accept_rate(config, folder_name, file_name, 'dipco_features.npy')
 
     # quantize the internal streaming model here and then test it
     folder_name = "tflite_stream_state_internal_quant"
     file_name = "stream_state_internal_quantize.tflite"
     utils.convert_saved_model_to_tflite(
-        flags,
-        os.path.join(flags.train_dir, "stream_state_internal"),
-        os.path.join(flags.train_dir, folder_name),
+        config,
+        os.path.join(config["train_dir"], "stream_state_internal"),
+        os.path.join(config["train_dir"], folder_name),
         file_name,
         quantize=True,
     )
-    test.tflite_model_accuracy(flags, folder_name, file_name)
-    test.streaming_model_false_accept_rate(flags, folder_name, file_name, 'dipco_features.npy')
+    test.tflite_model_accuracy(config, folder_name, file_name)
+    test.streaming_model_false_accept_rate(
+        config, folder_name, file_name, "dipco_features.npy"
+    )

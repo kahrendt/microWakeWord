@@ -247,7 +247,7 @@ def convert_to_inference_model(model, input_tensors, mode):
         raise ValueError("non supported mode ", mode)
 
 
-def to_streaming_inference(model_non_stream, flags, mode):
+def to_streaming_inference(model_non_stream, config, mode):
     """Convert non streaming trained model to inference modes.
 
     Args:
@@ -260,7 +260,7 @@ def to_streaming_inference(model_non_stream, flags, mode):
       Keras inference model of inference_type
     """
     # tf.keras.backend.set_learning_phase(0)
-    input_data_shape = modes.get_input_data_shape(flags, mode)
+    input_data_shape = modes.get_input_data_shape(config, mode)
 
     # get input data type and use it for input streaming type
     if isinstance(model_non_stream.input, (tuple, list)):
@@ -285,7 +285,7 @@ def to_streaming_inference(model_non_stream, flags, mode):
             )
         input_tensors.append(
             tf.keras.layers.Input(
-                shape=flags.cond_shape,
+                shape=config["cond_shape"],
                 batch_size=1,
                 dtype=model_non_stream.input[1].dtype,
                 name="cond_features",
@@ -298,7 +298,7 @@ def to_streaming_inference(model_non_stream, flags, mode):
 
 def model_to_saved(
     model_non_stream,
-    flags,
+    config,
     save_model_path,
     mode=modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
 ):
@@ -326,7 +326,7 @@ def model_to_saved(
         model = model_non_stream
     else:
         # convert non streaming Keras model to Keras streaming model, internal state
-        model = to_streaming_inference(model_non_stream, flags, mode)
+        model = to_streaming_inference(model_non_stream, config, mode)
 
     save_model_summary(model, save_model_path)
     model.save(save_model_path, include_optimizer=False, save_format="tf")
@@ -334,18 +334,14 @@ def model_to_saved(
 
 # Converts the saved model to tflite (updated)
 #   - If specified, will quantize using several positive and negative validation samples
-def convert_saved_model_to_tflite(flags, path_to_model, folder, fname, quantize=False):
+def convert_saved_model_to_tflite(config, path_to_model, folder, fname, quantize=False):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    audio_processor = input_data.FeatureHandler(
-        general_negative_data_dir=flags.general_negative_dir,
-        adversarial_negative_data_dir=flags.adversarial_negative_dir,
-        positive_data_dir=flags.positive_dir,
-    )
+    audio_processor = input_data.FeatureHandler(config)
 
     validation_fingerprints, validation_ground_truth, _ = audio_processor.get_data(
-        "validation", batch_size=flags.batch_size, features_length=74
+        "validation", batch_size=config["batch_size"], features_length=74
     )
 
     def representative_dataset_gen():
@@ -388,7 +384,7 @@ def convert_saved_model_to_tflite(flags, path_to_model, folder, fname, quantize=
 
 
 # Saves model with specified weights to disk (updated)
-def convert_model_saved(flags, folder, mode, weights_name="best_weights"):
+def convert_model_saved(flags, config, folder, mode, weights_name="best_weights"):
     """Convert model to streaming and non streaming SavedModel.
 
     Args:
@@ -397,18 +393,20 @@ def convert_model_saved(flags, folder, mode, weights_name="best_weights"):
         mode: inference mode
         weights_name: file name with model weights
     """
-    flags.batch_size = 1  # set batch size for inference
+    old_batch_size = config["batch_size"]
+    config["batch_size"] = 1  # set batch size for inference
 
-    model = inception.model(flags)
-    model.load_weights(os.path.join(flags.train_dir, weights_name)).expect_partial()
+    model = inception.model(flags, config)
+    model.load_weights(os.path.join(config["train_dir"], weights_name)).expect_partial()
 
-    path_model = os.path.join(flags.train_dir, folder)
+    path_model = os.path.join(config["train_dir"], folder)
     if not os.path.exists(path_model):
         os.makedirs(path_model)
     try:
         # convert trained model to SavedModel
-        model_to_saved(model, flags, path_model, mode)
+        model_to_saved(model, config, path_model, mode)
     except IOError as e:
         logging.warning("FAILED to write file: %s", e)
     except (ValueError, AttributeError, RuntimeError, TypeError, AssertionError) as e:
         logging.warning("WARNING: failed to convert to SavedModel: %s", e)
+    config["batch_size"] = old_batch_size

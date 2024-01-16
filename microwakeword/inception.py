@@ -193,7 +193,7 @@ def model_parameters(parser_nn):
     )
 
 
-def model(flags):
+def model(flags, config):
     """Inception model.
 
     It is based on paper:
@@ -206,8 +206,8 @@ def model(flags):
       Keras model for training
     """
     input_audio = tf.keras.layers.Input(
-        shape=modes.get_input_data_shape(flags, modes.Modes.TRAINING),
-        batch_size=flags.batch_size,
+        shape=modes.get_input_data_shape(config, modes.Modes.TRAINING),
+        batch_size=config["batch_size"],
     )
     net = input_audio
 
