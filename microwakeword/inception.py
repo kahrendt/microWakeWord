@@ -247,7 +247,8 @@ def model(flags, config):
     Rethinking the Inception Architecture for Computer Vision
         http://arxiv.org/abs/1512.00567
     Args:
-      flags: data/model parameters
+      flags: data/model parameters.
+      config: dictionary containing microWakeWord training configuration.
 
     Returns:
       Keras model for training
