@@ -92,14 +92,15 @@ def conv2d_bn(
         x: input tensor.
         filters: filters in `Conv2D`.
         kernel_size: size of convolution kernel.
+        dilation: dilation rate.
         padding: padding mode in `Conv2D`.
         strides: strides in `Conv2D`.
         activation: activation function applied in the end.
         use_bias: use bias for convolution.
-        scale: scale batch normalization.
+        subgroups: the number of subgroups used for sub-spectral normaliation.
 
     Returns:
-        Output tensor after applying `Conv2D` and `BatchNormalization`.
+        Output tensor after applying `Conv2D` and `SubSpectralNormalization`.
     """
 
     x = tf.keras.layers.Conv2D(
@@ -131,21 +132,22 @@ def conv2d_bn_delay(
     delay_val=1,
     subgroups=1,
 ):
-    """Utility function to apply conv + BN while managing the streaming wrapper.
+    """Utility function to apply conv + BN.
 
     Arguments:
         x: input tensor.
         filters: filters in `Conv2D`.
         kernel_size: size of convolution kernel.
+        dilation: dilation rate.
         padding: padding mode in `Conv2D`.
         strides: strides in `Conv2D`.
         activation: activation function applied in the end.
         use_bias: use bias for convolution.
-        scale: scale batch normalization.
-        use_one_steP : use one_step mode for streaming wrapper
+        delay_val: number of features for delay layer when using `same` padding.
+        subgroups: the number of subgroups used for sub-spectral normaliation.
 
     Returns:
-        Output tensor after applying `Conv2D` and `BatchNormalization`.
+        Output tensor after applying `Conv2D` and `SubSpectralNormalization`.
     """
 
     if padding == "same":

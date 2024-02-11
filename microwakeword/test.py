@@ -22,6 +22,18 @@ import tensorflow as tf
 
 
 def compute_metrics(true_positives, true_negatives, false_positives, false_negatives):
+    """Utility function to compute various metrics.
+
+    Arguments:
+        true_positives: Count of samples correctly predicted as positive.
+        true_negatives: Count of samples correctly predicted as negative.
+        false_positives: Count of samples incorrectly predicted as positive.
+        false_negatives: Count of samples incorrectly predicted as negative.
+
+    Returns:
+        Metric dictionary with keys for `accuracy`, `recall`, `precision`, `false_positive_rate`, `false_negative_rate`, and `count`.
+    """
+
     accuracy = float("nan")
     false_positive_rate = float("nan")
     false_negative_rate = float("nan")
@@ -54,6 +66,15 @@ def compute_metrics(true_positives, true_negatives, false_positives, false_negat
 
 
 def metrics_to_string(metrics):
+    """Utility function to return a string that describes various metrics.
+
+    Arguments:
+        metrics: metric dictionary with keys for `accuracy`, `recall`, `precision`, `false_positive_rate`, `false_negative_rate`, and `count`.
+
+    Returns:
+        String describing the given metrics.
+    """
+
     return "accuracy = {accuracy:.4%}; recall = {recall:.4%}; precision = {precision:.4%}; fpr = {fpr:.4%}; fnr = {fnr:.4%}; (N={count})".format(
         accuracy=metrics["accuracy"],
         recall=metrics["recall"],
@@ -71,6 +92,19 @@ def tf_model_accuracy(
     data_set="testing",
     accuracy_name="tf_model_accuracy.txt",
 ):
+    """Function to test a TF model on a specified data set.
+
+    Arguments:
+        config: dictionary containing microWakeWord training configuration.
+        folder: folder containing the TF model.
+        audio_process:  microWakeWord FeatureHandler object for retrieving spectrograms.
+        data_set: data set to test the model on.
+        accuracy_name: filename to save metrics to.
+
+    Returns:
+        Metric dictionary with keys for `accuracy`, `recall`, `precision`, `false_positive_rate`, `false_negative_rate`, and `count`.
+    """
+
     test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
         data_set,
         batch_size=config["batch_size"],
@@ -143,6 +177,24 @@ def tflite_model_accuracy(
     tflite_model_name="stream_state_internal.tflite",
     accuracy_name="tflite_model_accuracy.txt",
 ):
+    """Function to test a TFLite model on a specified data set.
+
+    Model can be streaming or nonstreaming. If tested on an "_ambient" set, 
+    it detects a false accept if the previous probability was less than 0.5 
+    and the current probability is greater than 0.5.
+
+    Arguments:
+        config: dictionary containing microWakeWord training configuration.
+        folder: folder containing the TFLite model.
+        audio_process:  microWakeWord FeatureHandler object for retrieving spectrograms.
+        data_set: data set to test the model on.
+        tflite_model_name: filename of the TFLite model.
+        accuracy_name: filename to save metrics to.
+
+    Returns:
+        Metric dictionary with keys for `accuracy`, `recall`, `precision`, `false_positive_rate`, `false_negative_rate`, and `count`.
+    """
+
     interpreter = tf.lite.Interpreter(
         model_path=os.path.join(config["train_dir"], folder, tflite_model_name)
     )
