@@ -18,16 +18,16 @@ def mixup_augment(
     
     Args:
         spectrogram_1: the first spectrogram.
-        truth_1: the ground truth of the first spectrogram.
-        weight_1: the penalty weight of the first spectrogram.
-        spectrogram_2: the second spectrogram.
-        truth_2: the ground truth of the second spectrogram.
-        weight_2: the penalty weight of the second spectrogram.
+        truth_1: the ground truth of the first spectrogram
+        weight_1: the penalty weight of the first spectrogram
+        spectrogram_2: the second spectrogram
+        truth_2: the ground truth of the second spectrogram
+        weight_2: the penalty weight of the second spectrogram
 
     Returns:
-        spectrogram: the blended spectrogram.
-        truth: the blended ground truth.
-        weight: the blended penalty weight.
+        spectrogram: the blended spectrogram
+        truth: the blended ground truth
+        weight: the blended penalty weight
     """  
     
     combined_spectrogram = spectrogram_1 * mix_ratio + spectrogram_2 * (1 - mix_ratio)
@@ -45,17 +45,17 @@ def freqmix_augment(
     https://arxiv.org/pdf/2204.11479v5.pdf
     
     Args:
-        spectrogram_1: the first spectrogram.
-        truth_1: the ground truth of the first spectrogram.
-        weight_1: the penalty weight of the first spectrogram.
-        spectrogram_2: the second spectrogram.
-        truth_2: the ground truth of the second spectrogram.
-        weight_2: the penalty weight of the second spectrogram.
+        spectrogram_1: the first spectrogram
+        truth_1: the ground truth of the first spectrogram
+        weight_1: the penalty weight of the first spectrogram
+        spectrogram_2: the second spectrogram
+        truth_2: the ground truth of the second spectrogram
+        weight_2: the penalty weight of the second spectrogram
 
     Returns:
-        spectrogram: the blended spectrogram.
-        truth: the blended ground truth.
-        weight: the blended penalty weight.
+        spectrogram: the blended spectrogram
+        truth: the blended ground truth
+        weight: the blended penalty weight
     """  
 
     freq_bin_cutoff = int(mix_ratio * 40)
@@ -86,14 +86,14 @@ def spec_augment(
     Implementation based on https://github.com/pyyush/SpecAugment/tree/master
     
     Args:
-        spectrogram: the input spectrogram.
-        time_mask_max_size: maximum size of time feature masks.
-        time_mask_count: the total number of separate time masks.
-        freq_mask_max_size: maximum size of frequency feature masks.
-        time_mask_count: the total number of separate feature masks.
+        spectrogram: the input spectrogram
+        time_mask_max_size: maximum size of time feature masks
+        time_mask_count: the total number of separate time masks
+        freq_mask_max_size: maximum size of frequency feature masks
+        time_mask_count: the total number of separate feature masks
 
     Returns:
-        The masked spectrogram.
+        masked spectrogram
     """
 
     freq_bins = spectrogram.shape[0]
@@ -116,7 +116,7 @@ class FeatureHandler(object):
     """Class that handles loading spectrogram features and providing them to the training and testing functions.
 
     Args:
-      config: dictionary containing microWakeWord training configuration.
+      config: dictionary containing microWakeWord training configuration
     """
     def __init__(
         self,
@@ -159,10 +159,10 @@ class FeatureHandler(object):
         
         Args:
             feature_dict: dictionary with keys for:
-                features_dir: directory containing diffferent mode folders.
-                sampling_weight: weight for choosing a spectrogram from this set in the batch.
-                penalty_weight: penalizing weight for incorrect predictions from this set.
-                truth: boolean representing whether this set has positive samples or negative samples.
+                features_dir: directory containing diffferent mode folders
+                sampling_weight: weight for choosing a spectrogram from this set in the batch
+                penalty_weight: penalizing weight for incorrect predictions from this set
+                truth: boolean representing whether this set has positive samples or negative samples
                 truncation_strategy: if a spectrogram is longer than necessary for training, how is it truncated
         """
         data_dir = feature_dict["features_dir"]
@@ -216,10 +216,10 @@ class FeatureHandler(object):
         """Returns the durations of all spectrogram features in the given mode.
         
         Args:
-            mode: which training set to compute duration over. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`.
+            mode: which training set to compute duration over. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
 
         Returns:
-            Duration, in seconds, of all spectrograms in this mode 
+            duration, in seconds, of all spectrograms in this mode 
         """
         
         sample_duration = 0
@@ -232,10 +232,10 @@ class FeatureHandler(object):
         """Returns the count of all spectrogram features in the given mode.
         
         Args:
-            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`.
+            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
 
         Returns:
-            Count of spectrograms in given mode.
+            count of spectrograms in given mode
         """        
         sample_count = 0
         for feature_set in self.features:
@@ -260,22 +260,22 @@ class FeatureHandler(object):
         """Gets spectrograms from the appropriate mode. Ensures spectrograms are the approriate length and optionally applies augmentation.
         
         Args:
-            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`.
-            batch_size: number of spectrograms in the sample for training mode.
-            features_length: the length of the spectrograms.
+            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+            batch_size: number of spectrograms in the sample for training mode
+            features_length: the length of the spectrograms
             truncation_strategy: how to truncate spectrograms longer than `features_length`
             augmentation_policy: dictionary that specifies augmentation settings. It has the following keys:
-                mix_up_prob: probability that MixUp is applied.
-                freq_mix_prob: probability that FreqMix is applied.
-                time_mask_max_size: maximum size of time feature masks for SpecAugment.
-                time_mask_count: the total number of separate time masks applied for SpecAugment.
-                freq_mask_max_size: maximum size of frequency feature masks for SpecAugment.
-                time_mask_count: the total number of separate feature masks applied for SpecAugment.
+                mix_up_prob: probability that MixUp is applied
+                freq_mix_prob: probability that FreqMix is applied
+                time_mask_max_size: maximum size of time feature masks for SpecAugment
+                time_mask_count: the total number of separate time masks applied for SpecAugment
+                freq_mask_max_size: maximum size of frequency feature masks for SpecAugment
+                time_mask_count: the total number of separate feature masks applied for SpecAugment
 
         Returns:
-            data: spectrograms in a NumPy array (or as a list if in mode is `*_ambient`).
-            labels: ground truth for the spectrograms; i.e., whether a positive sample or negative sample.
-            weights: penalizing weight for incorrect predictions for each spectrogram.
+            data: spectrograms in a NumPy array (or as a list if in mode is `*_ambient`)
+            labels: ground truth for the spectrograms; i.e., whether a positive sample or negative sample
+            weights: penalizing weight for incorrect predictions for each spectrogram
         """     
         if mode == "training":
             sample_count = batch_size
@@ -489,9 +489,9 @@ class FeatureHandler(object):
         """Returns a spectrogram with specified length. Pads with zeros at the start if too short.
         
         Args:
-            spectrogram: the spectrogram to truncate or pad.
-            features_length: the desired spectrogram length.
-            truncation_strategy: how to truncate if ``spectrogram`` is longer than ``features_length``. One of:
+            spectrogram: the spectrogram to truncate or pad
+            features_length: the desired spectrogram length
+            truncation_strategy: how to truncate if ``spectrogram`` is longer than ``features_length`` One of:
                 random: choose a random portion of the entire spectrogram - useful for long negative samples
                 truncate_start: remove the start of the spectrogram
                 truncate_end: remove the end of the spectrogram
@@ -499,7 +499,7 @@ class FeatureHandler(object):
 
 
         Returns:
-            The fixed length spectrogram after truncating or padding.
+            fixed length spectrogram after truncating or padding
         """  
         data_length = spectrogram.shape[0]
         if data_length > features_length:

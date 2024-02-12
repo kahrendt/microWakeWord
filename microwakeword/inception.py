@@ -61,7 +61,7 @@ def parse(text):
     """Parse model parameters.
 
     Args:
-      text: string with layer parameters: '128,128' or "'relu','relu'".
+      text: string with layer parameters: '128,128' or "'relu','relu'"
 
     Returns:
       list of parsed parameters
@@ -89,18 +89,18 @@ def conv2d_bn(
     """Utility function to apply conv + BN.
 
     Arguments:
-        x: input tensor.
-        filters: filters in `Conv2D`.
-        kernel_size: size of convolution kernel.
-        dilation: dilation rate.
-        padding: padding mode in `Conv2D`.
-        strides: strides in `Conv2D`.
-        activation: activation function applied in the end.
-        use_bias: use bias for convolution.
-        subgroups: the number of subgroups used for sub-spectral normaliation.
+        x: input tensor
+        filters: filters in `Conv2D`
+        kernel_size: size of convolution kernel
+        dilation: dilation rate
+        padding: padding mode in `Conv2D`
+        strides: strides in `Conv2D`
+        activation: activation function applied in the end
+        use_bias: use bias for convolution
+        subgroups: the number of subgroups used for sub-spectral normaliation
 
     Returns:
-        Output tensor after applying `Conv2D` and `SubSpectralNormalization`.
+        output tensor after applying `Conv2D` and `SubSpectralNormalization`
     """
 
     x = tf.keras.layers.Conv2D(
@@ -135,19 +135,19 @@ def conv2d_bn_delay(
     """Utility function to apply conv + BN.
 
     Arguments:
-        x: input tensor.
-        filters: filters in `Conv2D`.
-        kernel_size: size of convolution kernel.
-        dilation: dilation rate.
-        padding: padding mode in `Conv2D`.
-        strides: strides in `Conv2D`.
-        activation: activation function applied in the end.
-        use_bias: use bias for convolution.
-        delay_val: number of features for delay layer when using `same` padding.
-        subgroups: the number of subgroups used for sub-spectral normaliation.
+        x: input tensor
+        filters: filters in `Conv2D`
+        kernel_size: size of convolution kernel
+        dilation: dilation rate
+        padding: padding mode in `Conv2D`
+        strides: strides in `Conv2D`
+        activation: activation function applied in the end
+        use_bias: use bias for convolution
+        delay_val: number of features for delay layer when using `same` padding
+        subgroups: the number of subgroups used for sub-spectral normaliation
 
     Returns:
-        Output tensor after applying `Conv2D` and `SubSpectralNormalization`.
+        output tensor after applying `Conv2D` and `SubSpectralNormalization`.
     """
 
     if padding == "same":
@@ -179,8 +179,9 @@ def model_parameters(parser_nn):
     """Inception model parameters.
 
     Args:
-      parser_nn: global command line args parser
-    Returns: parser with updated arguments
+        parser_nn: global command line args parser
+    Returns:
+        parser with updated arguments
     """
     parser_nn.add_argument(
         "--cnn1_filters",
@@ -247,8 +248,8 @@ def model(flags, config):
     Rethinking the Inception Architecture for Computer Vision
         http://arxiv.org/abs/1512.00567
     Args:
-      flags: data/model parameters.
-      config: dictionary containing microWakeWord training configuration.
+      flags: data/model parameters
+      config: dictionary containing microWakeWord training configuration
 
     Returns:
       Keras model for training
