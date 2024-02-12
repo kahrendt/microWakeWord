@@ -12,9 +12,24 @@ from mmap_ninja.ragged import RaggedMmap
 def mixup_augment(
     spectrogram_1, truth_1, weight_1, spectrogram_2, truth_2, weight_2, mix_ratio
 ):
-    # mixup: BEYOND EMPIRICAL RISK MINIMIZATION by H. Zhang, M. Cisse, Y. Dauphin, D. Lopez-Paz
-    # https://openreview.net/pdf?id=r1Ddp1-Rb
+    """Applies MixUp augment to the input spectrograms.
+    Based on mixup: BEYOND EMPIRICAL RISK MINIMIZATION by H. Zhang, M. Cisse, Y. Dauphin, D. Lopez-Paz
+    https://openreview.net/pdf?id=r1Ddp1-Rb
+    
+    Args:
+        spectrogram_1: the first spectrogram.
+        truth_1: the ground truth of the first spectrogram
+        weight_1: the penalty weight of the first spectrogram
+        spectrogram_2: the second spectrogram
+        truth_2: the ground truth of the second spectrogram
+        weight_2: the penalty weight of the second spectrogram
 
+    Returns:
+        spectrogram: the blended spectrogram
+        truth: the blended ground truth
+        weight: the blended penalty weight
+    """  
+    
     combined_spectrogram = spectrogram_1 * mix_ratio + spectrogram_2 * (1 - mix_ratio)
     combined_truth = float(truth_1) * mix_ratio + float(truth_2) * (1 - mix_ratio)
     combined_weight = weight_1 * mix_ratio + weight_2 * (1 - mix_ratio)
@@ -25,8 +40,23 @@ def mixup_augment(
 def freqmix_augment(
     spectrogram_1, truth_1, weight_1, spectrogram_2, truth_2, weight_2, mix_ratio
 ):
-    # END-TO-END AUDIO STRIKES BACK: BOOSTING AUGMENTATIONS TOWARDS AN EFFICIENT AUDIO CLASSIFICATION NETWORK by A. Gazneli, G. Zimerman, T. Ridnik, G. Sharir, A. Noy
-    # https://arxiv.org/pdf/2204.11479v5.pdf
+    """Applies FreqMix augment to the input spectrograms.
+    Based on END-TO-END AUDIO STRIKES BACK: BOOSTING AUGMENTATIONS TOWARDS AN EFFICIENT AUDIO CLASSIFICATION NETWORK by A. Gazneli, G. Zimerman, T. Ridnik, G. Sharir, A. Noy
+    https://arxiv.org/pdf/2204.11479v5.pdf
+    
+    Args:
+        spectrogram_1: the first spectrogram
+        truth_1: the ground truth of the first spectrogram
+        weight_1: the penalty weight of the first spectrogram
+        spectrogram_2: the second spectrogram
+        truth_2: the ground truth of the second spectrogram
+        weight_2: the penalty weight of the second spectrogram
+
+    Returns:
+        spectrogram: the blended spectrogram
+        truth: the blended ground truth
+        weight: the blended penalty weight
+    """  
 
     freq_bin_cutoff = int(mix_ratio * 40)
 
@@ -50,10 +80,21 @@ def spec_augment(
     freq_mask_max_size=0,
     freq_mask_count=1,
 ):
-    # SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition by D. Park, W. Chan, Y. Zhang, C. Chiu, B. Zoph, E Cubuk, Q Le
-    # https://arxiv.org/pdf/1904.08779.pdf
-    #
-    # implementation based on https://github.com/pyyush/SpecAugment/tree/master
+    """Applies SpecAugment to the input spectrogram.
+    Based on SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition by D. Park, W. Chan, Y. Zhang, C. Chiu, B. Zoph, E Cubuk, Q Le
+    https://arxiv.org/pdf/1904.08779.pdf
+    Implementation based on https://github.com/pyyush/SpecAugment/tree/master
+    
+    Args:
+        spectrogram: the input spectrogram
+        time_mask_max_size: maximum size of time feature masks
+        time_mask_count: the total number of separate time masks
+        freq_mask_max_size: maximum size of frequency feature masks
+        time_mask_count: the total number of separate feature masks
+
+    Returns:
+        masked spectrogram
+    """
 
     freq_bins = spectrogram.shape[0]
     time_frames = spectrogram.shape[1]
@@ -72,6 +113,11 @@ def spec_augment(
 
 
 class FeatureHandler(object):
+    """Class that handles loading spectrogram features and providing them to the training and testing functions.
+
+    Args:
+      config: dictionary containing microWakeWord training configuration
+    """
     def __init__(
         self,
         config,
@@ -109,6 +155,16 @@ class FeatureHandler(object):
             )
 
     def prepare_data(self, feature_dict):
+        """Loads data from a feature's config entry.
+        
+        Args:
+            feature_dict: dictionary with keys for:
+                features_dir: directory containing diffferent mode folders
+                sampling_weight: weight for choosing a spectrogram from this set in the batch
+                penalty_weight: penalizing weight for incorrect predictions from this set
+                truth: boolean representing whether this set has positive samples or negative samples
+                truncation_strategy: if a spectrogram is longer than necessary for training, how is it truncated
+        """
         data_dir = feature_dict["features_dir"]
 
         if not os.path.exists(data_dir):
@@ -146,7 +202,7 @@ class FeatureHandler(object):
                         }
                     )
 
-                    duration += 0.02 * imported_features[i].shape[0]
+                    duration += 0.02 * imported_features[i].shape[0]    # Each feature represents 0.02 seconds of audio
                     count += 1
 
             random.shuffle(feature_dict[set_index])
@@ -157,16 +213,32 @@ class FeatureHandler(object):
             }
 
     def get_mode_duration(self, mode):
-        sample_count = 0
+        """Returns the durations of all spectrogram features in the given mode.
+        
+        Args:
+            mode: which training set to compute duration over. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+
+        Returns:
+            duration, in seconds, of all spectrograms in this mode 
+        """
+        
+        sample_duration = 0
         for feature_set in self.features:
             # sample_count += len(feature_set[mode])
-            sample_count += feature_set["stats"][mode]["total_duration"]
-        return sample_count
+            sample_duration += feature_set["stats"][mode]["total_duration"]
+        return sample_duration
 
     def get_mode_size(self, mode):
+        """Returns the count of all spectrogram features in the given mode.
+        
+        Args:
+            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+
+        Returns:
+            count of spectrograms in given mode
+        """        
         sample_count = 0
         for feature_set in self.features:
-            # sample_count += len(feature_set[mode])
             sample_count += feature_set["stats"][mode]["spectrogram_count"]
         return sample_count
 
@@ -185,6 +257,26 @@ class FeatureHandler(object):
             "freq_mask_count": 3,
         },
     ):
+        """Gets spectrograms from the appropriate mode. Ensures spectrograms are the approriate length and optionally applies augmentation.
+        
+        Args:
+            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+            batch_size: number of spectrograms in the sample for training mode
+            features_length: the length of the spectrograms
+            truncation_strategy: how to truncate spectrograms longer than `features_length`
+            augmentation_policy: dictionary that specifies augmentation settings. It has the following keys:
+                mix_up_prob: probability that MixUp is applied
+                freq_mix_prob: probability that FreqMix is applied
+                time_mask_max_size: maximum size of time feature masks for SpecAugment
+                time_mask_count: the total number of separate time masks applied for SpecAugment
+                freq_mask_max_size: maximum size of frequency feature masks for SpecAugment
+                time_mask_count: the total number of separate feature masks applied for SpecAugment
+
+        Returns:
+            data: spectrograms in a NumPy array (or as a list if in mode is `*_ambient`)
+            labels: ground truth for the spectrograms; i.e., whether a positive sample or negative sample
+            weights: penalizing weight for incorrect predictions for each spectrogram
+        """     
         if mode == "training":
             sample_count = batch_size
         elif (mode == "validation") or (mode == "testing"):
@@ -206,17 +298,16 @@ class FeatureHandler(object):
                     else:
                         sample_count += len(
                             features_in_this_mode
-                        )  # VERIFY this is correct....
+                        )
 
         spectrogram_shape = (features_length, 40)
-
-        #### Give data as a list if ambient without splitting here
 
         data = np.zeros((sample_count,) + spectrogram_shape)
         labels = np.full(sample_count, 0.0)
         weights = np.ones(sample_count)
 
         if mode.endswith("ambient") and truncation_strategy == "none":
+            # Use a list instead of a numpy array; ambient set's spectrograms may have different lengths
             data = []
 
         if mode == "training":
@@ -395,6 +486,21 @@ class FeatureHandler(object):
     def fixed_length_spectrogram(
         self, spectrogram, features_length, truncation_strategy="random"
     ):
+        """Returns a spectrogram with specified length. Pads with zeros at the start if too short.
+        
+        Args:
+            spectrogram: the spectrogram to truncate or pad
+            features_length: the desired spectrogram length
+            truncation_strategy: how to truncate if ``spectrogram`` is longer than ``features_length`` One of:
+                random: choose a random portion of the entire spectrogram - useful for long negative samples
+                truncate_start: remove the start of the spectrogram
+                truncate_end: remove the end of the spectrogram
+                none: returns the entire spectrogram regardless of features_length
+
+
+        Returns:
+            fixed length spectrogram after truncating or padding
+        """  
         data_length = spectrogram.shape[0]
         if data_length > features_length:
             if truncation_strategy == "random":

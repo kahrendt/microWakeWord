@@ -331,11 +331,19 @@ def model_to_saved(
     model.save(save_model_path, include_optimizer=False, save_format="tf")
 
 
-# Converts the saved model to tflite
-#   - If specified, will quantize using several positive and negative validation samples
 def convert_saved_model_to_tflite(
     config, audio_processor, path_to_model, folder, fname, quantize=False
 ):
+    """Convert SavedModel to TFLite and optionally quantize it.
+
+    Args:
+        config: dictionary containing microWakeWord training configuration
+        audio_processor:  microWakeWord FeatureHandler object for retrieving spectrograms
+        path_to_model: path to SavedModel
+        folder: folder where converted model will be saved
+        fname: output filename for TFLite file
+        quantize: boolean selecting whether to quantize the model
+    """
     if not os.path.exists(folder):
         os.makedirs(folder)
 
@@ -372,12 +380,12 @@ def convert_saved_model_to_tflite(
     open(path_to_output, "wb").write(tflite_model)
 
 
-# Saves model with specified weights to disk
 def convert_model_saved(flags, config, folder, mode, weights_name="best_weights"):
     """Convert model to streaming and non streaming SavedModel.
 
     Args:
         flags: model and data settings
+        config: dictionary containing microWakeWord training configuration
         folder: folder where converted model will be saved
         mode: inference mode
         weights_name: file name with model weights
