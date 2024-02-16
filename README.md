@@ -45,12 +45,13 @@ The streaming model performs inferences every 20 ms on the newest audio stride. 
 
 Benchmarking and comparing wake word models is challenging. It is hard to account for all the different operating environments. [Picovoice](https://github.com/Picovoice/wake-word-benchmark) has provided one benchmark for at least one point of comparison.
 
-The following graph depicts the false-accept/false-reject rate for the "Hey Jarvis" model compared to the equivalent openWakeWord model.
-![FPR/FRR curve for "hey jarvis" pre-trained model](benchmarks/oww_comparison.jpg)
+The following graph depicts the false-accept/false-reject rate for the "Hey Jarvis" model. Note that the test clips used in the benchmark are created with Piper sample generator, not real voice samples.
+![FPR/FRR curve for "hey jarvis" pre-trained model](benchmarks/hey_jarvis_roc_curve.png)
 
-Graph Credit: [dscripka](https://github.com/dscripka)
 
-For a more rigorous false acceptance metric, we tested the "Hey Jarvis" on the [Dinner Party Corpus](https://www.amazon.science/publications/dipco-dinner-party-corpus) dataset. The component's default configuration values result in a 0.187 false accept rate per hour.
+The default parameters (probablity cutoff of 0.5 and average window size of 10) has a false rejection rate of 0.67% and 0.081 false accepts per hour with the Picovoice benchmark dataset.
+
+For a more rigorous false acceptance metric, we tested the "Hey Jarvis" on the [Dinner Party Corpus](https://www.amazon.science/publications/dipco-dinner-party-corpus) dataset. The component's default configuration values result in a 0.375 false accepts per hour.
 
 ## Model Training Process
 
