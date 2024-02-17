@@ -4,6 +4,33 @@ microWakeWord is an open-source wakeword library for detecting custom wake words
 
 **microWakeword is currently available as a very early release. microWakeWord can generate features and train models. It does not include sample generation or audio augmentations. The training process produces usable models if you manually fine-tune penalty weights.**
 
+
+## Benchmarks
+
+Benchmarking and comparing wake word models is challenging. It is hard to account for all the different operating environments. [Picovoice](https://github.com/Picovoice/wake-word-benchmark) has provided one benchmark for at least one point of comparison. For a more rigorous false acceptance metric, we also test on the [Dinner Party Corpus](https://www.amazon.science/publications/dipco-dinner-party-corpus) dataset.
+
+### Okay Nabu
+
+The following graph depicts the false-accept/false-reject rate for the "Okay Nabu" model. Note that the test clips used in the benchmark are created with Piper sample generator, not real voice samples.
+![FPR/FRR curve for "Okay Nabu" pre-trained model](benchmarks/okay_nabu_roc_curve.png)
+
+The default parameters (probablity cutoff of 0.5 and average window size of 10) has a false rejection rate of 2% and 0.122 false accepts per hour with the Picovoice benchmark dataset. There are 0.187 false accepts per hour on the Dinner Party Corpus with these settings.
+
+### Hey Jarvis
+
+The following graph depicts the false-accept/false-reject rate for the "Hey Jarvis" model. Note that the test clips used in the benchmark are created with Piper sample generator, not real voice samples.
+![FPR/FRR curve for "Hey Jarvis" pre-trained model](benchmarks/hey_jarvis_roc_curve.png)
+
+The default parameters (probablity cutoff of 0.5 and average window size of 10) has a false rejection rate of 0.67% and 0.081 false accepts per hour with the Picovoice benchmark dataset. There are 0.375 false accepts per hour on the Dinner Party Corpus with these settings.
+
+### Alexa
+
+The following graph depicts the false-accept/false-reject rate for the "Alexa" model. The positive samples are real recordings sources from the Picovoice repository.
+![FPR/FRR curve for "Alexa" pre-trained model](benchmarks/alexa_roc_curve.png)
+
+The default parameters (probability cutoff of 0.66 and average window size of 10) has a false rejection rate of 3.49% and 0.486 false accepts per hour with the Picovoice benchmark dataset. There are 0.187 false accepts per hour on the Dinner Party Corpus with these settings.
+
+
 ## Detection Process
 
 We detect the wake word in two stages. Raw audio data is processed into 40 features every 20 ms. These features construct a spectrogram. The streaming inference model uses the newest slice of feature data as input and returns a probability that the wake word is said. If the model consistently predicts the wake word over multiple windows, then we predict that the wake word has been said.
@@ -41,17 +68,6 @@ The streaming model performs inferences every 20 ms on the newest audio stride. 
 - We should generate spectrogram features over a longer time period than needed for training the model. The preprocessor model applies PCAN and noise reduction, and generating features over a longer time period results in models that are better to generalize. _This is not currently automatically implemented in microWakeWord._
 - We quantize the streaming models to increase performance on low-power devices. This has a small performance penalty that varies from model to model, but it typically lowers accuracy on the test dataset by around 0.05%.
 
-## Benchmarks
-
-Benchmarking and comparing wake word models is challenging. It is hard to account for all the different operating environments. [Picovoice](https://github.com/Picovoice/wake-word-benchmark) has provided one benchmark for at least one point of comparison.
-
-The following graph depicts the false-accept/false-reject rate for the "Hey Jarvis" model. Note that the test clips used in the benchmark are created with Piper sample generator, not real voice samples.
-![FPR/FRR curve for "hey jarvis" pre-trained model](benchmarks/hey_jarvis_roc_curve.png)
-
-
-The default parameters (probablity cutoff of 0.5 and average window size of 10) has a false rejection rate of 0.67% and 0.081 false accepts per hour with the Picovoice benchmark dataset.
-
-For a more rigorous false acceptance metric, we tested the "Hey Jarvis" on the [Dinner Party Corpus](https://www.amazon.science/publications/dipco-dinner-party-corpus) dataset. The component's default configuration values result in a 0.375 false accepts per hour.
 
 ## Model Training Process
 
