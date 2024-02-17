@@ -43,15 +43,22 @@ The streaming model performs inferences every 20 ms on the newest audio stride. 
 
 ## Benchmarks
 
-Benchmarking and comparing wake word models is challenging. It is hard to account for all the different operating environments. [Picovoice](https://github.com/Picovoice/wake-word-benchmark) has provided one benchmark for at least one point of comparison.
+Benchmarking and comparing wake word models is challenging. It is hard to account for all the different operating environments. [Picovoice](https://github.com/Picovoice/wake-word-benchmark) has provided one benchmark for at least one point of comparison. For a more rigorous false acceptance metric, we also test on the [Dinner Party Corpus](https://www.amazon.science/publications/dipco-dinner-party-corpus) dataset. The component's default configuration values result in a 0.375 false accepts per hour.
 
+
+### Alexa
+
+The following graph depicts the false-accept/false-reject rate for the "Alexa" model. The positive samples are real recordings sources from the Picovoice repository.
+![FPR/FRR curve for "Alexa" pre-trained model](benchmarks/alexa_roc_curve.png)
+
+The default parameters (probability cutoff of 0.66 and average window size of 10) has a false rejection rate of 3.49% and 0.486 false accepts per hour with the Picovoice benchmark dataset. There are 0.187 false accepts per hour on the Dinner Party Corpus with these settings.
+
+### Hey Jarvis
 The following graph depicts the false-accept/false-reject rate for the "Hey Jarvis" model. Note that the test clips used in the benchmark are created with Piper sample generator, not real voice samples.
-![FPR/FRR curve for "hey jarvis" pre-trained model](benchmarks/hey_jarvis_roc_curve.png)
+![FPR/FRR curve for "Hey Jarvis" pre-trained model](benchmarks/hey_jarvis_roc_curve.png)
 
+The default parameters (probablity cutoff of 0.5 and average window size of 10) has a false rejection rate of 0.67% and 0.081 false accepts per hour with the Picovoice benchmark dataset. There are 0.375 false accepts per hour on the Dinner Party Corpus with these settings.
 
-The default parameters (probablity cutoff of 0.5 and average window size of 10) has a false rejection rate of 0.67% and 0.081 false accepts per hour with the Picovoice benchmark dataset.
-
-For a more rigorous false acceptance metric, we tested the "Hey Jarvis" on the [Dinner Party Corpus](https://www.amazon.science/publications/dipco-dinner-party-corpus) dataset. The component's default configuration values result in a 0.375 false accepts per hour.
 
 ## Model Training Process
 
