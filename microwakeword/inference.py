@@ -79,12 +79,14 @@ class Model():
         predictions = []
         for chunk in chunks:
             if self.is_quantized_model:
-                new_data_to_input = self.quantize_input_data(chunk, self.input_details[0])
+                chunk = self.quantize_input_data(chunk, self.input_details[0])
+
             self.model.set_tensor(
                 self.input_details[0]["index"],
-                np.reshape(new_data_to_input, self.input_details[0]["shape"]),
+                np.reshape(chunk, self.input_details[0]["shape"]),
             )
             self.model.invoke()
+
             output = self.model.get_tensor(self.output_details[0]["index"])[0][0]
             if self.is_quantized_model:
                 output = self.dequantize_output_data(output, self.output_details[0])
