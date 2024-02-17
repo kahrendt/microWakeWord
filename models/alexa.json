@@ -3,7 +3,7 @@
   "wake_word": "alexa",
   "author": "Kevin Ahrendt",
   "website": "https://www.kevinahrendt.com/",
-  "model": "./hey_jarvis.tflite",
+  "model": "./alexa.tflite",
   "version": 1,
   "micro": {
     "probability_cutoff": 0.66,
