@@ -76,6 +76,7 @@ def augment_clips_generator(
     max_end_jitter_s=0.1,
     augmented_duration_s=None,
     max_clip_duration_s=None,
+    min_clip_duration_s=None,
 ):
     """
     Generator function that augments audio data (16 khz, 16-bit PCM audio data).
@@ -103,8 +104,12 @@ def augment_clips_generator(
         max_end_jitter_s (float): The maximum time (in seconds) to pad files on the right.
         augmented_duration_s (float): The final duration (in seconds) of the augmented file.
                                       It will be padded on the right randomly up to max_end_jitter_s,
-                                      and the remaining time padded on the left.
-        max_cli_duration_s (float): The maximum clip duration (in seconds) of the input audio clips.
+                                      and the remaining time padded on the left. Set to None to let
+                                      spectrogram represent the clips actual duration.
+        max_clip_duration_s (float): The maximum clip duration (in seconds) of the input audio clips.
+                                     Set to None to not restrict clips.
+        min_clip_duration_s (float): The minimum clip duration (in seconds) of the input audio clips.
+                                     Set to None to not restrict clips.
 
 
     Yields:
@@ -168,6 +173,12 @@ def augment_clips_generator(
                 / 32767.0
             )
 
+            if min_clip_duration_s is not None:
+                # Skip augmenting clip of shorter than the specified min clip duration
+                min_samples = int(min_clip_duration_s * 16000)
+                if input_audio.shape[0] < min_samples:
+                    continue
+
             if max_clip_duration_s is not None:
                 # Skip augmenting clip if longer than the specified max clip duration
                 max_samples = int(max_clip_duration_s * 16000)
@@ -207,6 +218,7 @@ def generate_augmented_clips(
     augmented_duration_s=5,
     max_end_jitter_s=0.1,
     max_clip_duration_s=1.39,
+    min_clip_duration_s=None,
 ):
     """
     Augments input audio data (16 khz, 16-bit PCM audio data) and saves as wave files.
@@ -226,6 +238,7 @@ def generate_augmented_clips(
         augmented_duration_s=augmented_duration_s,
         max_end_jitter_s=max_end_jitter_s,
         max_clip_duration_s=max_clip_duration_s,
+        min_clip_duration_s=min_clip_duration_s,
     )
 
     for counter, augmented_audio in enumerate(audio_generator):
@@ -255,6 +268,7 @@ def generate_augmented_features(
     augmented_duration_s=5,
     max_end_jitter_s=0.1,
     max_clip_duration_s=1.39,
+    min_clip_duration_s=None,    
 ):
     """
     Augments input audio data (16 khz, 16-bit PCM audio data) and computes TFLM
@@ -274,6 +288,7 @@ def generate_augmented_features(
             augmented_duration_s=augmented_duration_s,
             max_end_jitter_s=max_end_jitter_s,
             max_clip_duration_s=max_clip_duration_s,
+            min_clip_duration_s=min_clip_duration_s,
         ):
             yield generate_features_for_clip(audio_data)
 
