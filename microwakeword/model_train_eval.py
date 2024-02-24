@@ -296,7 +296,7 @@ if __name__ == "__main__":
                 data_processor,
                 data_set="testing_ambient",
                 tflite_model_name=file_name,
-                accuracy_name="testing_ambient_set_false_accepts",
+                accuracy_name="testing_ambient_set_false_accepts.txt",
             )
 
     if flags.test_tflite_streaming_quantized:
@@ -329,5 +329,5 @@ if __name__ == "__main__":
                 data_processor,
                 data_set="testing_ambient",
                 tflite_model_name=file_name,
-                accuracy_name="testing_ambient_set_false_accepts",
+                accuracy_name="testing_ambient_set_false_accepts.txt",
             )
