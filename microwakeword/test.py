@@ -21,6 +21,8 @@ from absl import logging
 import numpy as np
 import tensorflow as tf
 
+from microwakeword.inference import Model
+
 
 def compute_metrics(true_positives, true_negatives, false_positives, false_negatives):
     """Utility function to compute various metrics.
@@ -196,70 +198,7 @@ def tflite_model_accuracy(
         Metric dictionary with keys for `accuracy`, `recall`, `precision`, `false_positive_rate`, `false_negative_rate`, and `count`
     """
 
-    interpreter = tf.lite.Interpreter(
-        model_path=os.path.join(config["train_dir"], folder, tflite_model_name)
-    )
-    interpreter.allocate_tensors()
-
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-
-    is_quantized_model = input_details[0]["dtype"] == np.int8
-    input_feature_slices = input_details[0]["shape"][1]
-
-    for s in range(len(input_details)):
-        if is_quantized_model:
-            interpreter.set_tensor(
-                input_details[s]["index"],
-                np.zeros(input_details[s]["shape"], dtype=np.int8),
-            )
-        else:
-            interpreter.set_tensor(
-                input_details[s]["index"],
-                np.zeros(input_details[s]["shape"], dtype=np.float32),
-            )
-
-    def quantize_input_data(data, input_details):
-        """quantize the input data using scale and zero point
-
-        Args:
-            data (np.array in float): input data for the interpreter
-            input_details : output of get_input_details from the tflm interpreter.
-
-        Returns:
-          np.ndarray: quantized data as int8 dtype
-        """
-        # Get input quantization parameters
-        data_type = input_details["dtype"]
-
-        input_quantization_parameters = input_details["quantization_parameters"]
-        input_scale, input_zero_point = (
-            input_quantization_parameters["scales"][0],
-            input_quantization_parameters["zero_points"][0],
-        )
-        # quantize the input data
-        data = data / input_scale + input_zero_point
-        return data.astype(data_type)
-
-    def dequantize_output_data(data: np.ndarray, output_details: dict) -> np.ndarray:
-        """Dequantize the model output
-
-        Args:
-            data: integer data to be dequantized
-            output_details: TFLM interpreter model output details
-
-        Returns:
-            np.ndarray: dequantized data as float32 dtype
-        """
-        output_quantization_parameters = output_details["quantization_parameters"]
-        output_scale = output_quantization_parameters["scales"][0]
-        output_zero_point = output_quantization_parameters["zero_points"][0]
-        # Caveat: tflm_output_quant need to be converted to float to avoid integer
-        # overflow during dequantization
-        # e.g., (tflm_output_quant -output_zero_point) and
-        # (tflm_output_quant + (-output_zero_point))
-        # can produce different results (int8 calculation)
-        return output_scale * (data.astype(np.float32) - output_zero_point)
+    model = Model(os.path.join(config["train_dir"], folder, tflite_model_name))
 
     truncation_strategy = "truncate_start"
     if data_set.endswith("ambient"):
@@ -285,48 +224,10 @@ def tflite_model_accuracy(
         sample_fingerprint = test_fingerprints[i].astype(np.float32)
         sample_ground_truth = test_ground_truth[i]
 
-        for feature_index in range(
-            0, sample_fingerprint.shape[0], input_feature_slices
-        ):
-            new_data_to_input = sample_fingerprint[
-                feature_index : feature_index + input_feature_slices, :
-            ]
-
-            if is_quantized_model:
-                new_data_to_input = quantize_input_data(
-                    new_data_to_input, input_details[0]
-                )
-
-            # Input new data and invoke the interpreter
-            interpreter.set_tensor(
-                input_details[0]["index"],
-                np.reshape(new_data_to_input, input_details[0]["shape"]),
-            )
-            interpreter.invoke()
-
-            # get output states and feed them as inputs
-            # which will be fed in the next inference cycle for externally streaming models
-            for s in range(1, len(input_details)):
-                interpreter.set_tensor(
-                    input_details[s]["index"],
-                    interpreter.get_tensor(output_details[s]["index"]),
-                )
-
-            output = interpreter.get_tensor(output_details[0]["index"])
-            if is_quantized_model:
-                wakeword_probability = dequantize_output_data(
-                    output[0][0], output_details[0]
-                )
-            else:
-                wakeword_probability = output[0][0]
-
-            if truncation_strategy == "none":
-                if previous_probability <= 0.5 and wakeword_probability > 0.5:
-                    false_positives += 1
-                previous_probability = wakeword_probability
+        probabilities = model.predict_spectrogram(sample_fingerprint)
 
         if truncation_strategy != "none":
-            prediction = wakeword_probability > 0.5
+            prediction = probabilities[-1] > 0.5
             if sample_ground_truth == prediction:
                 if sample_ground_truth:
                     true_positives += 1
@@ -337,6 +238,17 @@ def tflite_model_accuracy(
                     false_negatives += 1
                 else:
                     false_positives += 1
+        else:
+            previous_probability = 0
+            last_positive_index = 0
+            for index, prob in enumerate(probabilities):
+                if (previous_probability <= 0.5 and prob > 0.5) and (
+                    index - last_positive_index
+                    > config["spectrogram_length_final_layer"]
+                ):
+                    false_positives += 1
+                    last_positive_index = index
+                previous_probability = prob
 
         metrics = compute_metrics(
             true_positives, true_negatives, false_positives, false_negatives
