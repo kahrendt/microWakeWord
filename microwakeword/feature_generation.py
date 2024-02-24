@@ -43,27 +43,28 @@ def generate_features_for_folder(
     )
 
 def generate_features_for_clip(clip, desired_spectrogram_length=0):
-    micro_frontend = frontend_op.audio_microfrontend(
-        tf.convert_to_tensor(clip),
-        sample_rate=16000,
-        window_size=30,
-        window_step=20,
-        num_channels=40,
-        upper_band_limit=7500,
-        lower_band_limit=125,
-        enable_pcan=True,
-        min_signal_remaining=0.05,
-        out_scale=1,
-        out_type=tf.float32,
-    )
-    output = tf.multiply(micro_frontend, 0.0390625)
+    with tf.device('/cpu:0'):
+        micro_frontend = frontend_op.audio_microfrontend(
+            tf.convert_to_tensor(clip),
+            sample_rate=16000,
+            window_size=30,
+            window_step=20,
+            num_channels=40,
+            upper_band_limit=7500,
+            lower_band_limit=125,
+            enable_pcan=True,
+            min_signal_remaining=0.05,
+            out_scale=1,
+            out_type=tf.float32,
+        )
+        output = tf.multiply(micro_frontend, 0.0390625)
 
-    spectrogram = output.numpy()
-    if desired_spectrogram_length > 0:
-        return spectrogram[
-            -desired_spectrogram_length:
-        ]  # truncate to match desired spectrogram size
-    return spectrogram
+        spectrogram = output.numpy()
+        if desired_spectrogram_length > 0:
+            return spectrogram[
+                -desired_spectrogram_length:
+            ]  # truncate to match desired spectrogram size
+        return spectrogram
 
 def features_generator(generator, desired_spectrogram_length=0):
     for data in generator:
