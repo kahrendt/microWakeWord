@@ -175,6 +175,7 @@ if __name__ == "__main__":
             length_minus_window / window_stride_samples
         )
 
+    config["spectrogram_length_final_layer"] = config["spectrogram_length"]
     config["spectrogram_length"] += spectrogram_slices_dropped
 
     logging.set_verbosity(flags.verbosity)
