@@ -80,6 +80,13 @@ if __name__ == "__main__":
         "This option is useful in cases when training was interrupted. "
         "With it you should adjust learning_rate and how_many_training_steps.",
     )
+    parser.add_argument(
+        "--use_weights",
+        type=str,
+        default="best_weights",
+        help="Which set of weights to use when creating the model"
+        "One of `best_weights`` or `last_weights`.",
+    )
 
     # Function used to parse --verbosity argument
     def verbosity_arg(value):
@@ -168,6 +175,7 @@ if __name__ == "__main__":
             length_minus_window / window_stride_samples
         )
 
+    config["spectrogram_length_final_layer"] = config["spectrogram_length"]
     config["spectrogram_length"] += spectrogram_slices_dropped
 
     logging.set_verbosity(flags.verbosity)
@@ -186,10 +194,10 @@ if __name__ == "__main__":
                     "model already exists in folder %s" % config["train_dir"]
                 ) from None
         config_fname = os.path.join(config["train_dir"], "training_config.yaml")
-        
+
         with open(config_fname, "w") as outfile:
             yaml.dump(config, outfile, default_flow_style=False)
-            
+
         train.train(flags, config, data_processor)
     else:
         if not os.path.isdir(config["train_dir"]):
@@ -208,7 +216,7 @@ if __name__ == "__main__":
             config,
             "non_stream",
             modes.Modes.NON_STREAM_INFERENCE,
-            weights_name="best_weights",
+            weights_name=flags.use_weights,
         )
 
     if flags.test_tf_nonstreaming:
@@ -216,7 +224,13 @@ if __name__ == "__main__":
         logging.info("Testing nonstreaming model")
 
         folder_name = "non_stream"
-        test.tf_model_accuracy(config, folder_name, data_processor, data_set="testing")
+        test.tf_model_accuracy(
+            config,
+            folder_name,
+            data_processor,
+            data_set="testing",
+            accuracy_name="testing_set_metrics.txt",
+        )
 
     if flags.test_tflite_nonstreaming:
         # Convert the nonstreaming model to TFLite then test it
@@ -234,7 +248,11 @@ if __name__ == "__main__":
 
         logging.info("Testing the TFLite nonstreaming model")
         test.tflite_model_accuracy(
-            config, folder_name, data_processor, tflite_model_name=file_name
+            config,
+            folder_name,
+            data_processor,
+            tflite_model_name=file_name,
+            accuracy_name="testing_set_metrics.txt",
         )
 
     if flags.test_tflite_streaming or flags.test_tflite_streaming_quantized:
@@ -246,7 +264,7 @@ if __name__ == "__main__":
             config,
             "stream_state_internal",
             modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
-            weights_name="best_weights",
+            weights_name=flags.use_weights,
         )
 
     if flags.test_tflite_streaming:
@@ -265,7 +283,11 @@ if __name__ == "__main__":
 
         logging.info("Testing the non-quantized TFLite streaming model")
         test.tflite_model_accuracy(
-            config, folder_name, data_processor, tflite_model_name=file_name
+            config,
+            folder_name,
+            data_processor,
+            tflite_model_name=file_name,
+            accuracy_name="testing_set_metrics.txt",
         )
         if data_processor.get_mode_size("testing_ambient") > 0:
             test.tflite_model_accuracy(
@@ -274,6 +296,7 @@ if __name__ == "__main__":
                 data_processor,
                 data_set="testing_ambient",
                 tflite_model_name=file_name,
+                accuracy_name="testing_ambient_set_false_accepts.txt",
             )
 
     if flags.test_tflite_streaming_quantized:
@@ -293,7 +316,11 @@ if __name__ == "__main__":
 
         logging.info("Testing the quantized TFLite streaming model")
         test.tflite_model_accuracy(
-            config, folder_name, data_processor, tflite_model_name=file_name
+            config,
+            folder_name,
+            data_processor,
+            tflite_model_name=file_name,
+            accuracy_name="testing_set_metrics.txt",
         )
         if data_processor.get_mode_size("testing_ambient") > 0:
             test.tflite_model_accuracy(
@@ -302,4 +329,5 @@ if __name__ == "__main__":
                 data_processor,
                 data_set="testing_ambient",
                 tflite_model_name=file_name,
+                accuracy_name="testing_ambient_set_false_accepts.txt",
             )

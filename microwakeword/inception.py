@@ -18,43 +18,12 @@
 import ast
 import tensorflow as tf
 
+
+from microwakeword.layers import delay
 from microwakeword.layers import modes
 from microwakeword.layers import stream
-from microwakeword.layers import delay
+from microwakeword.layers import strided_drop
 from microwakeword.layers import sub_spectral_normalization
-
-
-class StridedDrop(tf.keras.layers.Layer):
-    """StridedDrop
-
-    Drops the specified audio feature slices in nonstreaming mode only.
-    Used for matching the dimensions of convolutions with valid padding.
-
-    Attributes:
-        time_sclices_to_drop: number of audio feature slices to drop
-        mode: inference mode; e.g., non-streaming, internal streaming
-    """
-
-    def __init__(
-        self, time_slices_to_drop, mode=modes.Modes.NON_STREAM_INFERENCE, **kwargs
-    ):
-        super(StridedDrop, self).__init__(**kwargs)
-        self.time_slices_to_drop = time_slices_to_drop
-        self.mode = mode
-
-    def call(self, inputs):
-        if self.mode == modes.Modes.NON_STREAM_INFERENCE:
-            return inputs[:, self.time_slices_to_drop :, :, :]
-
-        return inputs
-
-    def get_config(self):
-        config = {
-            "time_slices_to_drop": self.time_slices_to_drop,
-            "mode": self.mode,
-        }
-        base_config = super(StridedDrop, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
 
 
 def parse(text):
@@ -326,10 +295,14 @@ def model(flags, config):
             subgroups=subgroups,
         )
 
-        branch1_drop_layer = StridedDrop(branch1.shape[1] - branch3.shape[1])
+        branch1_drop_layer = strided_drop.StridedDrop(
+            branch1.shape[1] - branch3.shape[1]
+        )
         branch1 = branch1_drop_layer(branch1)
 
-        branch2_drop_layer = StridedDrop(branch2.shape[1] - branch3.shape[1])
+        branch2_drop_layer = strided_drop.StridedDrop(
+            branch2.shape[1] - branch3.shape[1]
+        )
         branch2 = branch2_drop_layer(branch2)
 
         net = tf.keras.layers.concatenate([branch1, branch2, branch3])

@@ -1,3 +1,19 @@
+# coding=utf-8
+# Copyright 2023 The Google Research Authors.
+# Modifications copyright 2024 Kevin Ahrendt.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 import pprint
 
@@ -42,8 +58,8 @@ def validate_nonstreaming(config, data_processor, model, test_set):
     metrics["loss"] = result[0]
     metrics["auc"] = result[8]
 
-    ambient_false_positives = 0 # float("nan")
-    estimated_ambient_false_positives_per_hour = 0 # float("nan")
+    ambient_false_positives = 0  # float("nan")
+    estimated_ambient_false_positives_per_hour = 0  # float("nan")
 
     if data_processor.get_mode_size("validation_ambient") > 0:
         (
