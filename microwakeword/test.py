@@ -15,6 +15,7 @@
 # limitations under the License.
 
 """Test utility functions for accuracy evaluation."""
+
 import os
 from absl import logging
 import numpy as np
