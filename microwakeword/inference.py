@@ -19,15 +19,17 @@
 # imports
 import numpy as np
 import tensorflow as tf
-from feature_generation import generate_features_for_clip
+from microwakeword.feature_generation import generate_features_for_clip
 
-class Model():
+
+class Model:
     """
     Class for loading and running tflite microwakeword models
 
     Args:
         tflite_model_path (str): path to tflite model file
     """
+
     def __init__(self, tflite_model_path):
         # Load tflite model
         interpreter = tf.lite.Interpreter(
@@ -67,6 +69,18 @@ class Model():
 
         # Get the spectrogram
         spec = generate_features_for_clip(data)
+
+        return self.predict_spectrogram(spec)
+
+    def predict_spectrogram(self, spec):
+        """Run the model on a single clip of audio data
+
+        Args:
+            spec (np.ndarray): input spectrogram
+
+        Returns:
+            list: model predictions for the input audio data
+        """
 
         # Slice the input data into the required number of chunks
         chunks = []
@@ -117,7 +131,9 @@ class Model():
         data = data / input_scale + input_zero_point
         return data.astype(data_type)
 
-    def dequantize_output_data(self, data: np.ndarray, output_details: dict) -> np.ndarray:
+    def dequantize_output_data(
+        self, data: np.ndarray, output_details: dict
+    ) -> np.ndarray:
         """Dequantize the model output
 
         Args:
