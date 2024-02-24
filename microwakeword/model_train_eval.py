@@ -224,7 +224,13 @@ if __name__ == "__main__":
         logging.info("Testing nonstreaming model")
 
         folder_name = "non_stream"
-        test.tf_model_accuracy(config, folder_name, data_processor, data_set="testing")
+        test.tf_model_accuracy(
+            config,
+            folder_name,
+            data_processor,
+            data_set="testing",
+            accuracy_name="testing_set_metrics.txt",
+        )
 
     if flags.test_tflite_nonstreaming:
         # Convert the nonstreaming model to TFLite then test it
@@ -242,7 +248,11 @@ if __name__ == "__main__":
 
         logging.info("Testing the TFLite nonstreaming model")
         test.tflite_model_accuracy(
-            config, folder_name, data_processor, tflite_model_name=file_name
+            config,
+            folder_name,
+            data_processor,
+            tflite_model_name=file_name,
+            accuracy_name="testing_set_metrics.txt",
         )
 
     if flags.test_tflite_streaming or flags.test_tflite_streaming_quantized:
@@ -273,7 +283,11 @@ if __name__ == "__main__":
 
         logging.info("Testing the non-quantized TFLite streaming model")
         test.tflite_model_accuracy(
-            config, folder_name, data_processor, tflite_model_name=file_name
+            config,
+            folder_name,
+            data_processor,
+            tflite_model_name=file_name,
+            accuracy_name="testing_set_metrics.txt",
         )
         if data_processor.get_mode_size("testing_ambient") > 0:
             test.tflite_model_accuracy(
@@ -282,6 +296,7 @@ if __name__ == "__main__":
                 data_processor,
                 data_set="testing_ambient",
                 tflite_model_name=file_name,
+                accuracy_name="testing_ambient_set_false_accepts",
             )
 
     if flags.test_tflite_streaming_quantized:
@@ -301,7 +316,11 @@ if __name__ == "__main__":
 
         logging.info("Testing the quantized TFLite streaming model")
         test.tflite_model_accuracy(
-            config, folder_name, data_processor, tflite_model_name=file_name
+            config,
+            folder_name,
+            data_processor,
+            tflite_model_name=file_name,
+            accuracy_name="testing_set_metrics.txt",
         )
         if data_processor.get_mode_size("testing_ambient") > 0:
             test.tflite_model_accuracy(
@@ -310,4 +329,5 @@ if __name__ == "__main__":
                 data_processor,
                 data_set="testing_ambient",
                 tflite_model_name=file_name,
+                accuracy_name="testing_ambient_set_false_accepts",
             )
