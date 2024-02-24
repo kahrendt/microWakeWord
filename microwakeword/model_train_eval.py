@@ -80,6 +80,13 @@ if __name__ == "__main__":
         "This option is useful in cases when training was interrupted. "
         "With it you should adjust learning_rate and how_many_training_steps.",
     )
+    parser.add_argument(
+        "--use_weights",
+        type=str,
+        default="best_weights",
+        help="Which set of weights to use when creating the model"
+        "One of `best_weights`` or `last_weights`.",
+    )
 
     # Function used to parse --verbosity argument
     def verbosity_arg(value):
@@ -186,10 +193,10 @@ if __name__ == "__main__":
                     "model already exists in folder %s" % config["train_dir"]
                 ) from None
         config_fname = os.path.join(config["train_dir"], "training_config.yaml")
-        
+
         with open(config_fname, "w") as outfile:
             yaml.dump(config, outfile, default_flow_style=False)
-            
+
         train.train(flags, config, data_processor)
     else:
         if not os.path.isdir(config["train_dir"]):
@@ -208,7 +215,7 @@ if __name__ == "__main__":
             config,
             "non_stream",
             modes.Modes.NON_STREAM_INFERENCE,
-            weights_name="best_weights",
+            weights_name=flags.use_weights,
         )
 
     if flags.test_tf_nonstreaming:
@@ -246,7 +253,7 @@ if __name__ == "__main__":
             config,
             "stream_state_internal",
             modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
-            weights_name="best_weights",
+            weights_name=flags.use_weights,
         )
 
     if flags.test_tflite_streaming:
