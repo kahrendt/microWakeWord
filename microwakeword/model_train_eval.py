@@ -154,14 +154,6 @@ if __name__ == "__main__":
         else:
             return [res]
 
-    spectrogram_slices_dropped = 0
-    for kernel_size in parse(flags.cnn1_kernel_sizes):
-        spectrogram_slices_dropped += kernel_size - 1
-    for kernel_size, dilation in zip(
-        parse(flags.cnn2_kernel_sizes), parse(flags.cnn2_dilation)
-    ):
-        spectrogram_slices_dropped += 2 * dilation * (kernel_size - 1)
-
     desired_samples = int(config["sample_rate"] * config["clip_duration_ms"] / 1000)
     window_size_samples = int(config["sample_rate"] * config["window_size_ms"] / 1000)
     window_stride_samples = int(
@@ -176,7 +168,25 @@ if __name__ == "__main__":
         )
 
     config["spectrogram_length_final_layer"] = config["spectrogram_length"]
+    spectrogram_slices_dropped = 0
+
+    # Load model
+    if flags.model_name == "inception":
+        model = model = inception.model(flags, config)
+
+        for kernel_size in parse(flags.cnn1_kernel_sizes):
+            spectrogram_slices_dropped += kernel_size - 1
+        for kernel_size, dilation in zip(
+            parse(flags.cnn2_kernel_sizes), parse(flags.cnn2_dilation)
+        ):
+            spectrogram_slices_dropped += 2 * dilation * (kernel_size - 1)
+    else:
+        raise ValueError("Unknown model type: {}".format(flags.model_name))
+
     config["spectrogram_length"] += spectrogram_slices_dropped
+
+    model = inception.model(flags, config)
+    logging.info(model.summary())
 
     logging.set_verbosity(flags.verbosity)
 
@@ -197,8 +207,9 @@ if __name__ == "__main__":
 
         with open(config_fname, "w") as outfile:
             yaml.dump(config, outfile, default_flow_style=False)
+        utils.save_model_summary(model, config["train_dir"])
 
-        train.train(flags, config, data_processor)
+        train.train(model, config, data_processor)
     else:
         if not os.path.isdir(config["train_dir"]):
             raise ValueError('model is not trained set "--train 1" and retrain it')
@@ -207,12 +218,24 @@ if __name__ == "__main__":
     with open(os.path.join(config["train_dir"], "flags.json"), "wt") as f:
         json.dump(flags.__dict__, f)
 
+    if (
+        flags.test_tf_nonstreaming
+        or flags.test_tflite_nonstreaming
+        or flags.test_tflite_streaming
+        or flags.test_tflite_streaming_quantized
+    ):
+        # Reload the model with a batch size of 1 for inference
+        config["batch_size"] = 1
+
+        if flags.model_name == "inception":
+            model = inception.model(flags, config)
+
     if flags.test_tf_nonstreaming or flags.test_tflite_nonstreaming:
         # Save the nonstreaming model to disk
         logging.info("Saving nonstreaming model")
 
         utils.convert_model_saved(
-            flags,
+            model,
             config,
             "non_stream",
             modes.Modes.NON_STREAM_INFERENCE,
@@ -260,7 +283,7 @@ if __name__ == "__main__":
         logging.info("Saving streaming model")
 
         utils.convert_model_saved(
-            flags,
+            model,
             config,
             "stream_state_internal",
             modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
