@@ -378,7 +378,7 @@ def convert_saved_model_to_tflite(
     open(path_to_output, "wb").write(tflite_model)
 
 
-def convert_model_saved(model, config, folder, mode, weights_name="best_weights"):
+def convert_model_saved(model, config, folder, mode):
     """Convert model to streaming and non streaming SavedModel.
 
     Args:
@@ -386,10 +386,7 @@ def convert_model_saved(model, config, folder, mode, weights_name="best_weights"
         config: dictionary containing microWakeWord training configuration
         folder: folder where converted model will be saved
         mode: inference mode
-        weights_name: file name with model weights
     """
-
-    model.load_weights(os.path.join(config["train_dir"], weights_name)).expect_partial()
 
     path_model = os.path.join(config["train_dir"], folder)
     if not os.path.exists(path_model):

@@ -230,6 +230,10 @@ if __name__ == "__main__":
         if flags.model_name == "inception":
             model = inception.model(flags, config)
 
+        model.load_weights(
+            os.path.join(config["train_dir"], flags.use_weights)
+        ).expect_partial()
+
     if flags.test_tf_nonstreaming or flags.test_tflite_nonstreaming:
         # Save the nonstreaming model to disk
         logging.info("Saving nonstreaming model")
@@ -239,7 +243,6 @@ if __name__ == "__main__":
             config,
             "non_stream",
             modes.Modes.NON_STREAM_INFERENCE,
-            weights_name=flags.use_weights,
         )
 
     if flags.test_tf_nonstreaming:
@@ -287,7 +290,6 @@ if __name__ == "__main__":
             config,
             "stream_state_internal",
             modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
-            weights_name=flags.use_weights,
         )
 
     if flags.test_tflite_streaming:
