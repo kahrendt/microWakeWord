@@ -178,9 +178,8 @@ if __name__ == "__main__":
 
     config["spectrogram_length"] += spectrogram_slices_dropped
 
-    model = inception.model(flags, config)
     logging.info(model.summary())
-
+    
     logging.set_verbosity(flags.verbosity)
 
     data_processor = input_data.FeatureHandler(config)
