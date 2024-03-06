@@ -168,18 +168,11 @@ if __name__ == "__main__":
         )
 
     config["spectrogram_length_final_layer"] = config["spectrogram_length"]
-    spectrogram_slices_dropped = 0
 
     # Load model
     if flags.model_name == "inception":
-        model = model = inception.model(flags, config)
-
-        for kernel_size in parse(flags.cnn1_kernel_sizes):
-            spectrogram_slices_dropped += kernel_size - 1
-        for kernel_size, dilation in zip(
-            parse(flags.cnn2_kernel_sizes), parse(flags.cnn2_dilation)
-        ):
-            spectrogram_slices_dropped += 2 * dilation * (kernel_size - 1)
+        model = inception.model(flags, config)
+        spectrogram_slices_dropped = inception.spectrogram_slices_dropped(flags)
     else:
         raise ValueError("Unknown model type: {}".format(flags.model_name))
 

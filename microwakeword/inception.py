@@ -210,6 +210,27 @@ def model_parameters(parser_nn):
     )
 
 
+def spectrogram_slices_dropped(flags):
+    """Computes the number of spectrogram slices dropped due to valid padding.
+
+    Args:
+        flags: data/model parameters
+
+    Returns:
+        int: number of spectrogram slices dropped
+    """
+    spectrogram_slices_dropped = 0
+
+    for kernel_size in parse(flags.cnn1_kernel_sizes):
+        spectrogram_slices_dropped += kernel_size - 1
+    for kernel_size, dilation in zip(
+        parse(flags.cnn2_kernel_sizes), parse(flags.cnn2_dilation)
+    ):
+        spectrogram_slices_dropped += 2 * dilation * (kernel_size - 1)
+
+    return spectrogram_slices_dropped
+
+
 def model(flags, config):
     """Inception model.
 
