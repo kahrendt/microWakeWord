@@ -20,7 +20,6 @@ import tensorflow as tf
 
 
 from microwakeword.layers import delay
-from microwakeword.layers import modes
 from microwakeword.layers import stream
 from microwakeword.layers import strided_drop
 from microwakeword.layers import sub_spectral_normalization
@@ -231,7 +230,7 @@ def spectrogram_slices_dropped(flags):
     return spectrogram_slices_dropped
 
 
-def model(flags, config):
+def model(flags, shape, batch_size):
     """Inception model.
 
     It is based on paper:
@@ -245,8 +244,8 @@ def model(flags, config):
       Keras model for training
     """
     input_audio = tf.keras.layers.Input(
-        shape=modes.get_input_data_shape(config, modes.Modes.TRAINING),
-        batch_size=config["batch_size"],
+        shape=shape,
+        batch_size=batch_size,
     )
     net = input_audio
 

@@ -29,6 +29,206 @@ import microwakeword.utils as utils
 
 from microwakeword.layers import modes
 
+
+def load_config(flags, model_module):
+    """Loads the training configuration from the specified yaml file.
+
+    Args:
+        flags (argparse.Namespace): command line flags
+        model_module (module): python module for loading the model
+
+    Returns:
+        dict: dictionary containing training configuration
+    """
+    config_filename = flags.training_config
+
+    # Default preprocessor settings
+    preprocessor_sample_rate = 16000  # Hz
+    preprocessor_window_size = 30  # ms
+    preprocessor_window_stride = 20  # ms
+
+    config = yaml.load(open(config_filename, "r").read(), yaml.Loader)
+
+    config["summaries_dir"] = os.path.join(config["train_dir"], "logs/")
+
+    desired_samples = int(preprocessor_sample_rate * config["clip_duration_ms"] / 1000)
+
+    window_size_samples = int(
+        preprocessor_sample_rate * preprocessor_window_size / 1000
+    )
+    window_stride_samples = int(
+        preprocessor_sample_rate * preprocessor_window_stride / 1000
+    )
+
+    length_minus_window = desired_samples - window_size_samples
+
+    if length_minus_window < 0:
+        config["spectrogram_length_final_layer"] = 0
+    else:
+        config["spectrogram_length_final_layer"] = 1 + int(
+            length_minus_window / window_stride_samples
+        )
+
+    config["spectrogram_length"] = config[
+        "spectrogram_length_final_layer"
+    ] + model_module.spectrogram_slices_dropped(flags)
+
+    config["flags"] = flags.__dict__
+
+    config["training_input_shape"] = modes.get_input_data_shape(
+        config, modes.Modes.TRAINING
+    )
+
+    return config
+
+
+def train_model(config, model, data_processor, restore_checkpoint):
+    """Trains a model.
+
+    Args:
+        config (dict): dictionary containing training configuration
+        model (Keras model): model architecture to train
+        data_processor (FeatureHandler): feature handler that loads spectrogram data
+        restore_checkpoint (bool): Whether to restore from checkpoint if model exists
+
+    Raises:
+        ValueError: If the model exists but the training flag isn't set
+    """
+    try:
+        os.makedirs(config["train_dir"])
+        os.mkdir(config["summaries_dir"])
+    except OSError as e:
+        if restore_checkpoint:
+            pass
+        else:
+            raise ValueError(
+                "model already exists in folder %s" % config["train_dir"]
+            ) from None
+    config_fname = os.path.join(config["train_dir"], "training_config.yaml")
+
+    with open(config_fname, "w") as outfile:
+        yaml.dump(config, outfile, default_flow_style=False)
+
+    utils.save_model_summary(model, config["train_dir"])
+
+    train.train(model, config, data_processor)
+
+
+def evaluate_model(
+    config,
+    model,
+    data_processor,
+    test_tf_nonstreaming,
+    test_tflite_nonstreaming,
+    test_tflite_streaming,
+    test_tflite_streaming_quantized,
+):
+    """Evaluates a model on test data.
+
+    Saves the nonstreaming model or streaming model in SavedModel format,
+    then converts it to TFLite as specified.
+
+    Args:
+        config (dict): dictionary containing training configuration
+        model (Keras model): model (with loaded weights) to test
+        data_processor (FeatureHandler): feature handler that loads spectrogram data
+        test_tf_nonstreaming (bool): Evaluate the nonstreaming SavedModel
+        test_tflite_nonstreaming (bool): Convert and evaluate nonstreaming TFLite model
+        test_tflite_streaming (bool): Convert and evaluate streaming TFLite model
+        test_tflite_streaming_quantized (bool): Convert and evaluate quantized streaming TFLite model
+    """
+    if test_tf_nonstreaming or test_tflite_nonstreaming:
+        # Save the nonstreaming model to disk
+        logging.info("Saving nonstreaming model")
+
+        utils.convert_model_saved(
+            model,
+            config,
+            "non_stream",
+            modes.Modes.NON_STREAM_INFERENCE,
+        )
+
+    if test_tflite_streaming or test_tflite_streaming_quantized:
+        # Save the internal streaming model to disk
+        logging.info("Saving streaming model")
+
+        utils.convert_model_saved(
+            model,
+            config,
+            "stream_state_internal",
+            modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
+        )
+
+    if test_tf_nonstreaming:
+        logging.info("Testing nonstreaming model")
+
+        folder_name = "non_stream"
+        test.tf_model_accuracy(
+            config,
+            folder_name,
+            data_processor,
+            data_set="testing",
+            accuracy_name="testing_set_metrics.txt",
+        )
+
+    tflite_log_strings = []
+    tflite_source_folders = []
+    tflite_output_folders = []
+    tflite_filenames = []
+    tflite_testing_datasets = []
+
+    if test_tflite_nonstreaming:
+        tflite_log_strings.append("nonstreaming model")
+        tflite_source_folders.append("non_stream")
+        tflite_output_folders.append("tflite_non_stream")
+        tflite_filenames.append("non_stream.tflite")
+        tflite_testing_datasets.append(["testing"])
+
+    if test_tflite_streaming:
+        tflite_log_strings.append("streaming model")
+        tflite_source_folders.append("stream_state_internal")
+        tflite_output_folders.append("tflite_stream_state_internal")
+        tflite_filenames.append("stream_state_internal.tflite")
+        tflite_testing_datasets.append(["testing", "testing_ambient"])
+
+    if test_tflite_streaming_quantized:
+        tflite_log_strings.append("quantized streaming model")
+        tflite_source_folders.append("stream_state_internal")
+        tflite_output_folders.append("tflite_stream_state_internal_quant")
+        tflite_filenames.append("stream_state_internal_quant.tflite")
+        tflite_testing_datasets.append(["testing", "testing_ambient"])
+
+    for log_string, source_folder, output_folder, filename, testing_datasets in zip(
+        tflite_log_strings,
+        tflite_source_folders,
+        tflite_output_folders,
+        tflite_filenames,
+        tflite_testing_datasets,
+    ):
+        logging.info("Converting " + log_string + " to TFLite")
+
+        utils.convert_saved_model_to_tflite(
+            config,
+            data_processor,
+            os.path.join(config["train_dir"], source_folder),
+            os.path.join(config["train_dir"], output_folder),
+            filename,
+        )
+
+        for dataset in testing_datasets:
+            logging.info(
+                "Testing the TFLite " + log_string + " on the " + dataset + " set"
+            )
+            test.tflite_model_accuracy(
+                config,
+                output_folder,
+                data_processor,
+                data_set=dataset,
+                tflite_model_name=filename,
+                accuracy_name=dataset + "_set_metrics.txt",
+            )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -133,82 +333,26 @@ if __name__ == "__main__":
     if unparsed:
         raise ValueError("Unknown argument: {}".format(unparsed))
 
-    config = yaml.load(open(flags.training_config, "r").read(), yaml.Loader)
+    logging.set_verbosity(flags.verbosity)
 
-    config["summaries_dir"] = os.path.join(config["train_dir"], "logs/")
-
-    def parse(text):
-        """Parse model parameters.
-
-        Args:
-        text: string with layer parameters: '128,128' or "'relu','relu'".
-
-        Returns:
-        list of parsed parameters
-        """
-        if not text:
-            return []
-        res = ast.literal_eval(text)
-        if isinstance(res, tuple):
-            return res
-        else:
-            return [res]
-
-    desired_samples = int(config["sample_rate"] * config["clip_duration_ms"] / 1000)
-    window_size_samples = int(config["sample_rate"] * config["window_size_ms"] / 1000)
-    window_stride_samples = int(
-        config["sample_rate"] * config["window_stride_ms"] / 1000
-    )
-    length_minus_window = desired_samples - window_size_samples
-    if length_minus_window < 0:
-        config["spectrogram_length"] = 0
-    else:
-        config["spectrogram_length"] = 1 + int(
-            length_minus_window / window_stride_samples
-        )
-
-    config["spectrogram_length_final_layer"] = config["spectrogram_length"]
-
-    # Load model
     if flags.model_name == "inception":
-        model = inception.model(flags, config)
-        spectrogram_slices_dropped = inception.spectrogram_slices_dropped(flags)
+        model_module = inception
     else:
         raise ValueError("Unknown model type: {}".format(flags.model_name))
 
-    config["spectrogram_length"] += spectrogram_slices_dropped
-
-    logging.info(model.summary())
-    
-    logging.set_verbosity(flags.verbosity)
+    config = load_config(flags, model_module)
 
     data_processor = input_data.FeatureHandler(config)
 
     if flags.train:
-        try:
-            os.makedirs(config["train_dir"])
-            os.mkdir(config["summaries_dir"])
-        except OSError as e:
-            if flags.restore_checkpoint:
-                pass
-            else:
-                raise ValueError(
-                    "model already exists in folder %s" % config["train_dir"]
-                ) from None
-        config_fname = os.path.join(config["train_dir"], "training_config.yaml")
-
-        with open(config_fname, "w") as outfile:
-            yaml.dump(config, outfile, default_flow_style=False)
-        utils.save_model_summary(model, config["train_dir"])
-
-        train.train(model, config, data_processor)
+        model = model_module.model(
+            flags, config["training_input_shape"], config["batch_size"]
+        )
+        logging.info(model.summary())
+        train_model(config, model, data_processor, flags.restore_checkpoint)
     else:
         if not os.path.isdir(config["train_dir"]):
             raise ValueError('model is not trained set "--train 1" and retrain it')
-
-    # write all flags settings into json TODO Switch to saving config.yaml?
-    with open(os.path.join(config["train_dir"], "flags.json"), "wt") as f:
-        json.dump(flags.__dict__, f)
 
     if (
         flags.test_tf_nonstreaming
@@ -216,135 +360,20 @@ if __name__ == "__main__":
         or flags.test_tflite_streaming
         or flags.test_tflite_streaming_quantized
     ):
-        # Reload the model with a batch size of 1 for inference
-        config["batch_size"] = 1
-
-        if flags.model_name == "inception":
-            model = inception.model(flags, config)
+        model = model_module.model(
+            flags, shape=config["training_input_shape"], batch_size=1
+        )
 
         model.load_weights(
             os.path.join(config["train_dir"], flags.use_weights)
         ).expect_partial()
 
-    if flags.test_tf_nonstreaming or flags.test_tflite_nonstreaming:
-        # Save the nonstreaming model to disk
-        logging.info("Saving nonstreaming model")
-
-        utils.convert_model_saved(
+        evaluate_model(
+            config,
             model,
-            config,
-            "non_stream",
-            modes.Modes.NON_STREAM_INFERENCE,
-        )
-
-    if flags.test_tf_nonstreaming:
-        # Test the nonstreaming model
-        logging.info("Testing nonstreaming model")
-
-        folder_name = "non_stream"
-        test.tf_model_accuracy(
-            config,
-            folder_name,
             data_processor,
-            data_set="testing",
-            accuracy_name="testing_set_metrics.txt",
+            flags.test_tf_nonstreaming,
+            flags.test_tflite_nonstreaming,
+            flags.test_tflite_streaming,
+            flags.test_tflite_streaming_quantized,
         )
-
-    if flags.test_tflite_nonstreaming:
-        # Convert the nonstreaming model to TFLite then test it
-        logging.info("Converting nonstreaming model to TFLite")
-
-        folder_name = "tflite_non_stream"
-        file_name = "non_stream.tflite"
-        utils.convert_saved_model_to_tflite(
-            config,
-            data_processor,
-            os.path.join(config["train_dir"], "non_stream"),
-            os.path.join(config["train_dir"], folder_name),
-            file_name,
-        )
-
-        logging.info("Testing the TFLite nonstreaming model")
-        test.tflite_model_accuracy(
-            config,
-            folder_name,
-            data_processor,
-            tflite_model_name=file_name,
-            accuracy_name="testing_set_metrics.txt",
-        )
-
-    if flags.test_tflite_streaming or flags.test_tflite_streaming_quantized:
-        # Save the internal streaming model to disk
-        logging.info("Saving streaming model")
-
-        utils.convert_model_saved(
-            model,
-            config,
-            "stream_state_internal",
-            modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
-        )
-
-    if flags.test_tflite_streaming:
-        # Convert the internal streaming model to TFLite then test it
-        logging.info("Converting streaming model (non-quantized) to TFLite")
-
-        folder_name = "tflite_stream_state_internal"
-        file_name = "stream_state_internal.tflite"
-        utils.convert_saved_model_to_tflite(
-            config,
-            data_processor,
-            os.path.join(config["train_dir"], "stream_state_internal"),
-            os.path.join(config["train_dir"], folder_name),
-            file_name,
-        )
-
-        logging.info("Testing the non-quantized TFLite streaming model")
-        test.tflite_model_accuracy(
-            config,
-            folder_name,
-            data_processor,
-            tflite_model_name=file_name,
-            accuracy_name="testing_set_metrics.txt",
-        )
-        if data_processor.get_mode_size("testing_ambient") > 0:
-            test.tflite_model_accuracy(
-                config,
-                folder_name,
-                data_processor,
-                data_set="testing_ambient",
-                tflite_model_name=file_name,
-                accuracy_name="testing_ambient_set_false_accepts.txt",
-            )
-
-    if flags.test_tflite_streaming_quantized:
-        # Quantize while converting the internal streaming model to TFLite and then test it
-        logging.info("Quantizing and converting streaming model to TFLite")
-
-        folder_name = "tflite_stream_state_internal_quant"
-        file_name = "stream_state_internal_quantize.tflite"
-        utils.convert_saved_model_to_tflite(
-            config,
-            data_processor,
-            os.path.join(config["train_dir"], "stream_state_internal"),
-            os.path.join(config["train_dir"], folder_name),
-            file_name,
-            quantize=True,
-        )
-
-        logging.info("Testing the quantized TFLite streaming model")
-        test.tflite_model_accuracy(
-            config,
-            folder_name,
-            data_processor,
-            tflite_model_name=file_name,
-            accuracy_name="testing_set_metrics.txt",
-        )
-        if data_processor.get_mode_size("testing_ambient") > 0:
-            test.tflite_model_accuracy(
-                config,
-                folder_name,
-                data_processor,
-                data_set="testing_ambient",
-                tflite_model_name=file_name,
-                accuracy_name="testing_ambient_set_false_accepts.txt",
-            )
