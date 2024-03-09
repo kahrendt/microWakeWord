@@ -396,7 +396,7 @@ class ClipsHandler:
 
         assert max_samples_from_end > len(x)
 
-        samples_from_end = np.random.randint(len(x), max_samples_from_end + 1)
+        samples_from_end = np.random.randint(len(x), max_samples_from_end) + 1
 
         dat[-samples_from_end : -samples_from_end + len(x)] = x
 
