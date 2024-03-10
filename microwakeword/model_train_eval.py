@@ -22,10 +22,11 @@ import yaml
 from absl import logging
 
 import microwakeword.data as input_data
-import microwakeword.inception as inception
 import microwakeword.train as train
 import microwakeword.test as test
 import microwakeword.utils as utils
+
+import microwakeword.inception as inception
 
 from microwakeword.layers import modes
 
@@ -176,6 +177,7 @@ def evaluate_model(
     tflite_output_folders = []
     tflite_filenames = []
     tflite_testing_datasets = []
+    tflite_quantize = []
 
     if test_tflite_nonstreaming:
         tflite_log_strings.append("nonstreaming model")
@@ -183,6 +185,7 @@ def evaluate_model(
         tflite_output_folders.append("tflite_non_stream")
         tflite_filenames.append("non_stream.tflite")
         tflite_testing_datasets.append(["testing"])
+        tflite_quantize.append(False)
 
     if test_tflite_streaming:
         tflite_log_strings.append("streaming model")
@@ -190,6 +193,7 @@ def evaluate_model(
         tflite_output_folders.append("tflite_stream_state_internal")
         tflite_filenames.append("stream_state_internal.tflite")
         tflite_testing_datasets.append(["testing", "testing_ambient"])
+        tflite_quantize.append(False)
 
     if test_tflite_streaming_quantized:
         tflite_log_strings.append("quantized streaming model")
@@ -197,13 +201,22 @@ def evaluate_model(
         tflite_output_folders.append("tflite_stream_state_internal_quant")
         tflite_filenames.append("stream_state_internal_quant.tflite")
         tflite_testing_datasets.append(["testing", "testing_ambient"])
+        tflite_quantize.append(True)
 
-    for log_string, source_folder, output_folder, filename, testing_datasets in zip(
+    for (
+        log_string,
+        source_folder,
+        output_folder,
+        filename,
+        testing_datasets,
+        quantize,
+    ) in zip(
         tflite_log_strings,
         tflite_source_folders,
         tflite_output_folders,
         tflite_filenames,
         tflite_testing_datasets,
+        tflite_quantize,
     ):
         logging.info("Converting " + log_string + " to TFLite")
 
@@ -213,6 +226,7 @@ def evaluate_model(
             os.path.join(config["train_dir"], source_folder),
             os.path.join(config["train_dir"], output_folder),
             filename,
+            quantize=quantize,
         )
 
         for dataset in testing_datasets:
