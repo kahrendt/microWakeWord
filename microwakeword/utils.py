@@ -256,7 +256,7 @@ def to_streaming_inference(model_non_stream, config, mode):
     Returns:
       Keras inference model of inference_type
     """
-    # tf.keras.backend.set_learning_phase(0)
+
     input_data_shape = modes.get_input_data_shape(config, mode)
 
     # get input data type and use it for input streaming type
@@ -392,7 +392,7 @@ def convert_model_saved(model, config, folder, mode):
     if not os.path.exists(path_model):
         os.makedirs(path_model)
     try:
-        # convert trained model to SavedModel
+        # Convert trained model to SavedModel
         model_to_saved(model, config, path_model, mode)
     except IOError as e:
         logging.warning("FAILED to write file: %s", e)
