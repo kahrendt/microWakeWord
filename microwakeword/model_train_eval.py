@@ -15,8 +15,6 @@
 # limitations under the License.
 
 import argparse
-import ast
-import json
 import os
 import yaml
 from absl import logging
