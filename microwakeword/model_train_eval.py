@@ -25,6 +25,7 @@ import microwakeword.test as test
 import microwakeword.utils as utils
 
 import microwakeword.inception as inception
+import microwakeword.xception as xception
 
 from microwakeword.layers import modes
 
@@ -340,6 +341,8 @@ if __name__ == "__main__":
     # inception model settings
     parser_inception = subparsers.add_parser("inception")
     inception.model_parameters(parser_inception)
+    parser_xception = subparsers.add_parser("xception")
+    xception.model_parameters(parser_xception)
 
     flags, unparsed = parser.parse_known_args()
     if unparsed:
@@ -349,6 +352,8 @@ if __name__ == "__main__":
 
     if flags.model_name == "inception":
         model_module = inception
+    elif flags.model_name == "xception":
+        model_module = xception
     else:
         raise ValueError("Unknown model type: {}".format(flags.model_name))
 
