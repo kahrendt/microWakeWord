@@ -385,6 +385,9 @@ def train(model, config, data_processor):
                 (best_maximization_quantity * 100),
             )
 
+    # Save checkpoint after training
+    checkpoint.save(file_prefix=checkpoint_prefix)
+
     testing_fingerprints, testing_ground_truth, _ = data_processor.get_data(
         "testing",
         batch_size=config["batch_size"],
