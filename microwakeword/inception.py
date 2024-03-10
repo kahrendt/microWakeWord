@@ -20,7 +20,6 @@ import tensorflow as tf
 
 
 from microwakeword.layers import delay
-from microwakeword.layers import modes
 from microwakeword.layers import stream
 from microwakeword.layers import strided_drop
 from microwakeword.layers import sub_spectral_normalization
@@ -210,7 +209,28 @@ def model_parameters(parser_nn):
     )
 
 
-def model(flags, config):
+def spectrogram_slices_dropped(flags):
+    """Computes the number of spectrogram slices dropped due to valid padding.
+
+    Args:
+        flags: data/model parameters
+
+    Returns:
+        int: number of spectrogram slices dropped
+    """
+    spectrogram_slices_dropped = 0
+
+    for kernel_size in parse(flags.cnn1_kernel_sizes):
+        spectrogram_slices_dropped += kernel_size - 1
+    for kernel_size, dilation in zip(
+        parse(flags.cnn2_kernel_sizes), parse(flags.cnn2_dilation)
+    ):
+        spectrogram_slices_dropped += 2 * dilation * (kernel_size - 1)
+
+    return spectrogram_slices_dropped
+
+
+def model(flags, shape, batch_size):
     """Inception model.
 
     It is based on paper:
@@ -224,8 +244,8 @@ def model(flags, config):
       Keras model for training
     """
     input_audio = tf.keras.layers.Input(
-        shape=modes.get_input_data_shape(config, modes.Modes.TRAINING),
-        batch_size=config["batch_size"],
+        shape=shape,
+        batch_size=batch_size,
     )
     net = input_audio
 

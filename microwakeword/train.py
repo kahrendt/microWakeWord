@@ -15,16 +15,12 @@
 # limitations under the License.
 
 import os
-import pprint
 
 from absl import logging
 from collections import deque
 
 import numpy as np
 import tensorflow as tf
-
-import microwakeword.inception as inception
-import microwakeword.utils as utils
 
 import microwakeword.test as test
 
@@ -94,12 +90,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
     return metrics
 
 
-def train(flags, config, data_processor):
-    model = inception.model(flags, config)
-
-    utils.save_model_summary(model, config["train_dir"])
-
-    logging.info(model.summary())
+def train(model, config, data_processor):
 
     # Assign default training settings if not set in the configuration yaml
     if not (training_steps_list := config.get("training_steps")):
@@ -139,9 +130,6 @@ def train(flags, config, data_processor):
     pad_list_with_last_entry(freq_mask_count_list, training_step_iterations)
     pad_list_with_last_entry(positive_class_weight_list, training_step_iterations)
     pad_list_with_last_entry(negative_class_weight_list, training_step_iterations)
-
-    with open(os.path.join(config["train_dir"], "flags.txt"), "wt") as f:
-        pprint.pprint(flags, stream=f)
 
     loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
     optimizer = tf.keras.optimizers.legacy.Adam()
@@ -396,6 +384,9 @@ def train(flags, config, data_processor):
                 best_minimization_quantity,
                 (best_maximization_quantity * 100),
             )
+
+    # Save checkpoint after training
+    checkpoint.save(file_prefix=checkpoint_prefix)
 
     testing_fingerprints, testing_ground_truth, _ = data_processor.get_data(
         "testing",
