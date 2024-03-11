@@ -24,6 +24,7 @@ import microwakeword.train as train
 import microwakeword.test as test
 import microwakeword.utils as utils
 
+import microwakeword.ds_tc_resnet as ds_tc_resnet
 import microwakeword.inception as inception
 import microwakeword.xception as xception
 
@@ -338,9 +339,13 @@ if __name__ == "__main__":
     # sub parser for model settings
     subparsers = parser.add_subparsers(dest="model_name", help="NN model name")
 
+    # ds_tc_resnet model settings
+    parser_ds_tc_resnet = subparsers.add_parser("ds_tc_resnet")
+    ds_tc_resnet.model_parameters(parser_ds_tc_resnet)
     # inception model settings
     parser_inception = subparsers.add_parser("inception")
     inception.model_parameters(parser_inception)
+    # xception model settings
     parser_xception = subparsers.add_parser("xception")
     xception.model_parameters(parser_xception)
 
@@ -350,7 +355,9 @@ if __name__ == "__main__":
 
     logging.set_verbosity(flags.verbosity)
 
-    if flags.model_name == "inception":
+    if flags.model_name == "ds_tc_resnet":
+        model_module = ds_tc_resnet
+    elif flags.model_name == "inception":
         model_module = inception
     elif flags.model_name == "xception":
         model_module = xception
