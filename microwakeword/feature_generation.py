@@ -125,6 +125,7 @@ class ClipsHandler:
         max_clip_duration_s=None,
         augmented_duration_s=None,
         max_start_time_from_right_s=None,
+        max_jitter_s=None,
     ):
         #######################
         # Setup augmentations #
@@ -175,13 +176,23 @@ class ClipsHandler:
                     p=augmentation_probabilities["BandStopFilter"]
                 ),
                 background_noise_augment,
-                audiomentations.Gain(
-                    p=augmentation_probabilities["Gain"],
-                    min_gain_in_db=-12,
-                    max_gain_in_db=0,
+                audiomentations.OneOf(
+                    transforms=[
+                        audiomentations.Gain(
+                            p=augmentation_probabilities["Gain"],
+                            min_gain_in_db=-12,
+                            max_gain_in_db=0,
+                        ),
+                        audiomentations.GainTransition(
+                            p=augmentation_probabilities["Gain"],
+                            min_gain_db=-12,
+                            max_gain_in_db=0,
+                        ),
+                    ]
                 ),
                 reverb_augment,
-            ]
+            ],
+            shuffle=True,
         )
 
         #####################################################
@@ -201,7 +212,14 @@ class ClipsHandler:
             if augmented_duration_s is not None:
                 max_clip_duration_s = min(max_clip_duration_s, augmented_duration_s)
 
+        self.max_jitter_s = max_jitter_s
         self.max_start_time_from_right_s = max_start_time_from_right_s
+        
+        if self.max_jitter_s is not None and self.max_start_time_from_right_s is not None:
+            raise ValueError(
+                "max_start_time_from_s and max_jitter_s cannot both be configured."
+            )
+        
         self.augmented_duration_s = augmented_duration_s
 
         if (self.max_start_time_from_right_s is not None) and (
@@ -391,6 +409,8 @@ class ClipsHandler:
 
         if self.max_start_time_from_right_s is not None:
             max_samples_from_end = int(self.max_start_time_from_right_s * sr)
+        elif self.max_jitter_s is not None:
+            max_samples_from_end = len(x) + int(self.max_jitter_s * sr)
         else:
             max_samples_from_end = self.desired_samples
 
