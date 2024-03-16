@@ -254,7 +254,7 @@ class Stream(tf.keras.layers.Layer):
                     0, dilation_rate[0] * (kernel_size[0] - 1) - (strides[0] - 1)
                 )
 
-        elif isinstance(wrapped_cell, tf.keras.layers.AveragePooling2D):
+        elif isinstance(wrapped_cell, (tf.keras.layers.AveragePooling2D, tf.keras.layers.MaxPooling2D)):
             strides = wrapped_cell.get_config()["strides"]
             pool_size = wrapped_cell.get_config()["pool_size"]
             self.stride = strides[0]
