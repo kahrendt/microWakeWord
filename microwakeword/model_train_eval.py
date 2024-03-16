@@ -26,6 +26,7 @@ import microwakeword.utils as utils
 
 import microwakeword.ds_tc_resnet as ds_tc_resnet
 import microwakeword.inception as inception
+import microwakeword.wide_matchbox as wide_matchbox
 import microwakeword.xception as xception
 
 from microwakeword.layers import modes
@@ -345,6 +346,9 @@ if __name__ == "__main__":
     # inception model settings
     parser_inception = subparsers.add_parser("inception")
     inception.model_parameters(parser_inception)
+    # wide_matchbox model settings
+    parser_wide_matchbox = subparsers.add_parser("wide_matchbox")
+    wide_matchbox.model_parameters(parser_wide_matchbox)
     # xception model settings
     parser_xception = subparsers.add_parser("xception")
     xception.model_parameters(parser_xception)
@@ -359,6 +363,8 @@ if __name__ == "__main__":
         model_module = ds_tc_resnet
     elif flags.model_name == "inception":
         model_module = inception
+    elif flags.model_name == "wide_matchbox":
+        model_module = wide_matchbox
     elif flags.model_name == "xception":
         model_module = xception
     else:
