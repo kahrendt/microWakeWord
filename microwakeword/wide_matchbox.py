@@ -120,6 +120,12 @@ def model_parameters(parser_nn):
         default=1,
         help="apply scaling in batch normalization layer",
     )
+    parser_nn.add_argument(
+        "--max_pool",
+        type=int,
+        default=0,
+        help="apply max pool before final convolution and sigmoid activation",
+    )
 
 
 def spectrogram_slices_dropped(flags):
@@ -357,7 +363,13 @@ def model(flags, shape, batch_size):
     # net = stream.Stream(cell=tf.keras.layers.Flatten())(net)
 
     # net = tf.keras.layers.Dense(1, activation="sigmoid")(net)    
-    net = stream.Stream(cell=tf.keras.layers.GlobalMaxPooling2D(keepdims=True))(net)
+
+    tf.transpose(net, perm=[0,1,3,2])
+    if flags.max_pool:
+        net = stream.Stream(cell=tf.keras.layers.MaxPooling2D(pool_size=(74,1)))(net)
+    else:
+        net = stream.Stream(cell=tf.keras.layers.AveragePooling2D(pool_size=(74,1)))(net)        
+    tf.transpose(net, perm=[0,1,3,2])
 
     net = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)(net)
 
