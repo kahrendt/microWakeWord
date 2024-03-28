@@ -1,0 +1,77 @@
+batch_size: 256
+binary_classification: false
+clip_duration_ms: 1490
+eval_step_interval: 500
+features:
+- features_dir: /Volumes/MachineLearning/training_data/okay_nabu/generated_positive
+  penalty_weight: 1
+  sampling_weight: 1
+  truncation_strategy: truncate_start
+  truth: true
+  type: mmap
+- features_dir: /Volumes/MachineLearning/training_data/okay_nabu/generated_negative
+  penalty_weight: 1
+  sampling_weight: 1
+  truncation_strategy: truncate_start
+  truth: false
+  type: mmap
+- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/english_speech_background
+  penalty_weight: 1
+  sampling_weight: 2
+  truncation_strategy: random
+  truth: false
+  type: mmap
+- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/non_english_speech_background
+  penalty_weight: 1
+  sampling_weight: 1
+  truncation_strategy: random
+  truth: false
+  type: mmap
+- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/dinner_party_background
+  penalty_weight: 3
+  sampling_weight: 2
+  truncation_strategy: random
+  truth: false
+  type: mmap
+- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/no_speech_background
+  penalty_weight: 1
+  sampling_weight: 1
+  truncation_strategy: random
+  truth: false
+  type: mmap
+- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/ambient_background
+  penalty_weight: 1
+  sampling_weight: 0.0
+  truncation_strategy: split
+  truth: false
+  type: mmap
+freq_mask_count:
+- 0
+freq_mask_max_size:
+- 0
+freq_mix_augmentation_prob:
+- 0
+learning_rates:
+- 0.002
+- 0.001
+- 0.0005
+- 0.0002
+maximization_metric: recall
+minimization_metric: ambient_false_positives_per_hour
+mix_up_augmentation_prob:
+- 0
+negative_class_weight:
+- 2
+- 3
+- 4
+- 5
+positive_class_weight:
+- 1
+target_minimization: 0.5
+time_mask_count:
+- 0
+time_mask_max_size:
+- 0
+train_dir: /Users/kahrendt/Documents/Hobbies/Machine_Learning/microwakeword/trained_models/okay_nabu_wide_matchbox
+training_steps:
+- 500
