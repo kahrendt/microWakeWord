@@ -96,7 +96,7 @@ def spec_augment(
     time_mask_count=1,
     freq_mask_max_size=0,
     freq_mask_count=1,
-    time_mask_minimum_frame=0,
+    time_mask_min_start=0,
 ):
     """Applies SpecAugment to the input spectrogram.
     Based on SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition by D. Park, W. Chan, Y. Zhang, C. Chiu, B. Zoph, E Cubuk, Q Le
@@ -114,18 +114,18 @@ def spec_augment(
         masked spectrogram
     """
 
-    freq_bins = spectrogram.shape[0]
-    time_frames = spectrogram.shape[1]
+    time_frames = spectrogram.shape[0]
+    freq_bins = spectrogram.shape[1]
+
+    for i in range(time_mask_count):
+        t = int(np.random.uniform(0, time_mask_max_size))
+        t0 = random.randint(time_mask_min_start, time_frames - t)
+        spectrogram[t0 : t0 + t, :] = 0
 
     for i in range(freq_mask_count):
         f = int(np.random.uniform(0, freq_mask_max_size))
         f0 = random.randint(0, freq_bins - f)
-        spectrogram[f0 : f0 + f, :] = 0
-
-    for i in range(time_mask_count):
-        t = int(np.random.uniform(0, time_mask_max_size))
-        t0 = random.randint(time_mask_minimum_frame, time_frames - t)
-        spectrogram[:, t0 : t0 + t] = 0
+        spectrogram[:, f0 : f0 + f] = 0
 
     return spectrogram
 
