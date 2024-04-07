@@ -96,6 +96,7 @@ def spec_augment(
     time_mask_count=1,
     freq_mask_max_size=0,
     freq_mask_count=1,
+    time_mask_minimum_frame=0,
 ):
     """Applies SpecAugment to the input spectrogram.
     Based on SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition by D. Park, W. Chan, Y. Zhang, C. Chiu, B. Zoph, E Cubuk, Q Le
@@ -123,7 +124,7 @@ def spec_augment(
 
     for i in range(time_mask_count):
         t = int(np.random.uniform(0, time_mask_max_size))
-        t0 = random.randint(0, time_frames - t)
+        t0 = random.randint(time_mask_minimum_frame, time_frames - t)
         spectrogram[:, t0 : t0 + t] = 0
 
     return spectrogram
@@ -183,6 +184,8 @@ class FeatureHandler(object):
         config,
     ):
         self.features = []
+
+        self.spectrogram_length_final_layer = config["spectrogram_length_final_layer"]
 
         logging.info("Loading and analyzing data sets.")
 
@@ -488,6 +491,7 @@ class FeatureHandler(object):
                     augmentation_policy["time_mask_count"],
                     augmentation_policy["freq_mask_max_size"],
                     augmentation_policy["freq_mask_count"],
+                    features_length - self.spectrogram_length_final_layer, # ensures the time mask blocks out a portion of the spectrogram in the full receptive field
                 )
         elif (mode == "validation") or (mode == "testing"):
             index = 0
