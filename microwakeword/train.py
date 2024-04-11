@@ -17,7 +17,6 @@
 import os
 
 from absl import logging
-from collections import deque
 
 import numpy as np
 import tensorflow as tf
@@ -34,12 +33,13 @@ def validate_nonstreaming(config, data_processor, model, test_set):
     )
 
     test_batch_size = 1000
-
+    
+    model.reset_metrics()
     for i in range(0, len(testing_fingerprints), test_batch_size):
         result = model.test_on_batch(
             testing_fingerprints[i : i + test_batch_size],
             testing_ground_truth[i : i + test_batch_size],
-            reset_metrics=(i == 0),
+            reset_metrics=False,
         )
 
     true_positives = result[4]
@@ -51,7 +51,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         true_positives, true_negatives, false_positives, false_negatives
     )
 
-    metrics["loss"] = result[0]
+    metrics["loss"] = result[9]
     metrics["auc"] = result[8]
 
     ambient_false_positives = 0  # float("nan")
@@ -68,12 +68,12 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             features_length=config["spectrogram_length"],
             truncation_strategy="split",
         )
-
+        model.reset_metrics()
         for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
             ambient_result = model.test_on_batch(
                 ambient_testing_fingerprints[i : i + test_batch_size],
                 ambient_testing_ground_truth[i : i + test_batch_size],
-                reset_metrics=(i == 0),
+                reset_metrics=False,
             )
 
         ambient_false_positives = ambient_result[5]
@@ -143,6 +143,7 @@ def train(model, config, data_processor):
         tf.keras.metrics.TrueNegatives(name="tn"),
         tf.keras.metrics.FalseNegatives(name="fn"),
         tf.keras.metrics.AUC(name="auc"),
+        tf.keras.metrics.BinaryCrossentropy(name="loss"),
     ]
 
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
@@ -165,8 +166,6 @@ def train(model, config, data_processor):
 
     best_minimization_quantity = 10000
     best_maximization_quantity = 0.0
-
-    results_deque = deque([])
 
     for training_step in range(1, training_steps_max + 1):
         training_steps_sum = 0
@@ -214,62 +213,50 @@ def train(model, config, data_processor):
             train_ground_truth,
             sample_weight=train_sample_weights,
             class_weight=class_weights,
+            reset_metrics=False,
         )
 
-        with train_writer.as_default():
-            metrics = test.compute_metrics(
-                true_positives=result[4],
-                false_positives=result[5],
-                true_negatives=result[6],
-                false_negatives=result[7],
-            )
+        # Print the running statistics in the current validation epoch
+        print("Validation Batch #{:d}: Accuracy = {:.3f}; Recall = {:.3f}; Precision = {:.3f}; Loss = {:.4f}; Mini-Batch #{:d}".format((training_step//config["eval_step_interval"]+1), result[1], result[2], result[3], result[9], (training_step % config["eval_step_interval"])), end='\r')
 
-            tf.summary.scalar("loss", result[0], step=training_step)
-            tf.summary.scalar("accuracy", result[1], step=training_step)
-            tf.summary.scalar("recall", result[2], step=training_step)
-            tf.summary.scalar("precision", result[3], step=training_step)
-            tf.summary.scalar("fpr", metrics["false_positive_rate"], step=training_step)
-            tf.summary.scalar("fnr", metrics["false_negative_rate"], step=training_step)
-            tf.summary.scalar("auc", result[8], step=training_step)
-
-            if not training_step % 25:
-                train_writer.flush()
-
-        if len(results_deque) >= 5:
-            results_deque.popleft()
-
-        results_deque.append(result)
-
-        if not training_step % 5:
-            loss = 0.0
-            accuracy = 0.0
-            recall = 0.0
-            precision = 0.0
-            for i in range(0, 5):
-                loss += results_deque[i][0]
-                accuracy += results_deque[i][1]
-                recall += results_deque[i][2]
-                precision += results_deque[i][3]
-
+        is_last_step = training_step == training_steps_max
+        if (training_step % config["eval_step_interval"]) == 0 or is_last_step:
             logging.info(
                 "Step #%d: rate %f, accuracy %.2f%%, recall %.2f%%, precision %.2f%%, cross entropy %f",
                 *(
                     training_step,
                     learning_rate,
-                    accuracy / 5.0 * 100,
-                    recall / 5.0 * 100,
-                    precision / 5.0 * 100,
-                    loss / 5.0,
+                    result[1]*100,
+                    result[2]* 100,
+                    result[3] * 100,
+                    result[9],
                 ),
             )
-
-        is_last_step = training_step == training_steps_max
-        if (training_step % config["eval_step_interval"]) == 0 or is_last_step:
+            
+            metrics = test.compute_metrics(
+                true_positives=result[4],
+                false_positives=result[5],
+                true_negatives=result[6],
+                false_negatives=result[7],
+            )     
+            
+            with train_writer.as_default():
+                tf.summary.scalar("loss", result[9], step=training_step)
+                tf.summary.scalar("accuracy", result[1], step=training_step)
+                tf.summary.scalar("recall", result[2], step=training_step)
+                tf.summary.scalar("precision", result[3], step=training_step)
+                tf.summary.scalar("fpr", metrics["false_positive_rate"], step=training_step)
+                tf.summary.scalar("fnr", metrics["false_negative_rate"], step=training_step)
+                tf.summary.scalar("auc", result[8], step=training_step)   
+                train_writer.flush()     
+            
+            
             model.save_weights(os.path.join(config["train_dir"], "last_weights"))
 
             nonstreaming_metrics = validate_nonstreaming(
                 config, data_processor, model, "validation"
             )
+            model.reset_metrics()   # reset metrics for next validation epoch of training
             logging.info(
                 "Step %d (nonstreaming): Validation accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f,",
                 *(
@@ -395,11 +382,12 @@ def train(model, config, data_processor):
         truncation_strategy="truncate_start",
     )
 
+    model.reset_metrics()
     for i in range(0, len(testing_fingerprints), config["batch_size"]):
         result = model.test_on_batch(
             testing_fingerprints[i : i + config["batch_size"]],
             testing_ground_truth[i : i + config["batch_size"]],
-            reset_metrics=(i == 0),
+            reset_metrics=False,
         )
 
     true_positives = result[4]
