@@ -366,9 +366,9 @@ def model(flags, shape, batch_size):
 
     tf.transpose(net, perm=[0,1,3,2])
     if flags.max_pool:
-        net = stream.Stream(cell=tf.keras.layers.MaxPooling2D(pool_size=(74,1)))(net)
+        net = stream.Stream(cell=tf.keras.layers.MaxPooling2D(pool_size=(54,1)))(net)
     else:
-        net = stream.Stream(cell=tf.keras.layers.AveragePooling2D(pool_size=(74,1)))(net)        
+        net = stream.Stream(cell=tf.keras.layers.AveragePooling2D(pool_size=(54,1)))(net)        
     tf.transpose(net, perm=[0,1,3,2])
 
     net = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)(net)
