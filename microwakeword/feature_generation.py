@@ -32,6 +32,31 @@ from tensorflow.lite.experimental.microfrontend.python.ops import (
     audio_microfrontend_op as frontend_op,
 )
 
+import webrtcvad
+
+def remove_silence(
+    x: np.ndarray,
+    frame_duration: float = 0.030,
+    sample_rate: int = 16000,
+    min_start: int = 2000,
+) -> np.ndarray:
+    """Uses webrtc voice activity detection to remove silence from the clips"""
+    vad = webrtcvad.Vad(0)
+    
+    float_type = x.dtype in (np.float32, np.float64)
+    
+    if float_type:
+        x = (x * 32767).astype(np.int16)
+    x_new = x[0:min_start].tolist()
+    step_size = int(sample_rate * frame_duration)
+    for i in range(min_start, x.shape[0] - step_size, step_size):
+        vad_res = vad.is_speech(x[i : i + step_size].tobytes(), sample_rate)
+        if vad_res:
+            x_new.extend(x[i : i + step_size].tolist())
+    if float_type:
+        trimmed_audio = np.array(x_new)
+        return np.array(trimmed_audio/32767).astype(np.float32)
+    return np.array(x_new).astype(np.int16)
 
 def generate_features_for_clip(audio, desired_spectrogram_length=None):
     """Generates spectrogram features for the given audio data.
@@ -126,6 +151,8 @@ class ClipsHandler:
         augmented_duration_s=None,
         max_start_time_from_right_s=None,
         max_jitter_s=None,
+        remove_silence=False,
+        truncate_clip_s=None,
     ):
         #######################
         # Setup augmentations #
@@ -144,8 +171,8 @@ class ClipsHandler:
             background_noise_augment = audiomentations.AddBackgroundNoise(
                 p=augmentation_probabilities["AddBackgroundNoise"],
                 sounds_path=background_paths,
-                min_snr_in_db=-10,
-                max_snr_in_db=15,
+                min_snr_db=-10,
+                max_snr_db=15,
             )
 
         if impulse_paths is not None:
@@ -306,6 +333,8 @@ class ClipsHandler:
             "audio", datasets.Audio(sampling_rate=16000)
         )
         self.clips = audio_dataset
+        self.remove_silence = remove_silence
+        self.truncate_clip_s = truncate_clip_s
 
     def augment_clip(self, input_audio):
         """Augments the input audio, optionally creating a fixed sized clip first.
@@ -316,6 +345,12 @@ class ClipsHandler:
         Returns:
             (ndarray): the augmented audio with sample rate 16 kHz and 16-bit samples
         """
+        if self.remove_silence:
+            input_audio = remove_silence(input_audio)
+            
+        if self.truncate_clip_s is not None:
+            input_audio = self.truncate_clip(input_audio)
+        
         if self.augmented_duration_s is not None:
             input_audio = self.create_fixed_size_clip(input_audio)
         output_audio = self.augment(input_audio, sample_rate=16000)
@@ -421,3 +456,10 @@ class ClipsHandler:
         dat[-samples_from_end : -samples_from_end + len(x)] = x
 
         return dat
+
+    def truncate_clip(self, x, sr=16000):
+        desired_samples = int(self.truncate_clip_s * sr)
+        if len(x) > desired_samples:
+            rn = np.random.randint(0, x.shape[0] - desired_samples)
+            x = x[rn:rn + desired_samples]
+        return x
