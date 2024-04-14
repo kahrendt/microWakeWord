@@ -153,6 +153,8 @@ class ClipsHandler:
         max_jitter_s=None,
         remove_silence=False,
         truncate_clip_s=None,
+        random_split_seed=None,
+        split_count=200,        
     ):
         #######################
         # Setup augmentations #
@@ -332,7 +334,21 @@ class ClipsHandler:
         audio_dataset = audio_dataset.cast_column(
             "audio", datasets.Audio(sampling_rate=16000)
         )
+        
+        if random_split_seed is not None:
+            train_testvalid = audio_dataset.train_test_split(test_size=2*split_count, seed=random_split_seed)
+            test_valid = train_testvalid['test'].train_test_split(test_size=0.5)
+            split_dataset = datasets.DatasetDict({
+                'train': train_testvalid['train'],
+                'test': test_valid['test'],
+                'validation': test_valid['train'],
+            })
+            self.split_clips = split_dataset
+                
+        
         self.clips = audio_dataset
+        
+        
         self.remove_silence = remove_silence
         self.truncate_clip_s = truncate_clip_s
 
@@ -400,18 +416,26 @@ class ClipsHandler:
         rand_augmented_clip = self.augment_random_clip()
         return self.generate_augmented_feature(rand_augmented_clip)
 
-    def augmented_features_generator(self):
+    def augmented_features_generator(self, split=None, repeat=1):
         """Generator function for augmenting all loaded clips and computing their spectrograms
 
         Yields:
             (ndarray): the spectrogram of an augmented audio clip
         """
-        for clip in self.clips:
-            audio = clip["audio"]["array"]
+        if split is None:
+            for clip in self.clips:
+                audio = clip["audio"]["array"]
 
-            yield self.generate_augmented_spectrogram(audio)
+                yield self.generate_augmented_spectrogram(audio)
+        else:
+            for i in range(repeat):
+                for clip in self.split_clips[split]:
+                    audio = clip["audio"]["array"]
 
-    def save_augmented_features(self, mmap_output_dir):
+                    yield self.generate_augmented_spectrogram(audio)
+
+
+    def save_augmented_features(self, mmap_output_dir, split=None, repeat=1):
         """Saves all augmented features in a RaggedMmap format
 
         Args:
@@ -419,7 +443,7 @@ class ClipsHandler:
         """
         RaggedMmap.from_generator(
             out_dir=mmap_output_dir,
-            sample_generator=self.augmented_features_generator(),
+            sample_generator=self.augmented_features_generator(split, repeat),
             batch_size=10,
             verbose=True,
         )
