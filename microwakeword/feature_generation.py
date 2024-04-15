@@ -490,7 +490,7 @@ class ClipsHandler:
             dat[-samples_from_end : -samples_from_end + len(x)] = x
         elif len(x) > self.desired_samples:
             samples_from_start = np.random.randint(0, len(x)-self.desired_samples)
-            dat = x[samples_from_start:]
+            dat = x[samples_from_start:samples_from_start+self.desired_samples]
         else:
             dat = x
 
