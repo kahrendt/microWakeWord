@@ -119,7 +119,10 @@ def spec_augment(
 
     for i in range(time_mask_count):
         t = int(np.random.uniform(0, time_mask_max_size))
-        t0 = random.randint(time_mask_min_start, time_frames - t)
+        if time_mask_min_start < (time_frames-t):
+            t0 = random.randint(time_mask_min_start, time_frames - t)
+        else:
+            t0 = time_mask_min_start
         spectrogram[t0 : t0 + t, :] = 0
 
     for i in range(freq_mask_count):
