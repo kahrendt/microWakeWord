@@ -154,7 +154,8 @@ class ClipsHandler:
         remove_silence=False,
         truncate_clip_s=None,
         random_split_seed=None,
-        split_count=200,        
+        split_count=200,  
+        repeat_clip_min_duration_s=None,      
     ):
         #######################
         # Setup augmentations #
@@ -351,6 +352,7 @@ class ClipsHandler:
         
         self.remove_silence = remove_silence
         self.truncate_clip_s = truncate_clip_s
+        self.repeat_clip_min_duration_s = repeat_clip_min_duration_s
 
     def augment_clip(self, input_audio):
         """Augments the input audio, optionally creating a fixed sized clip first.
@@ -366,6 +368,9 @@ class ClipsHandler:
             
         if self.truncate_clip_s is not None:
             input_audio = self.truncate_clip(input_audio)
+            
+        if self.repeat_clip_min_duration_s is not None:
+            input_audio = self.repeat_clip(input_audio)
         
         if self.augmented_duration_s is not None:
             input_audio = self.create_fixed_size_clip(input_audio)
@@ -419,16 +424,20 @@ class ClipsHandler:
     def augmented_features_generator(self, split=None, repeat=1):
         """Generator function for augmenting all loaded clips and computing their spectrograms
 
+        Args:
+            split (string): which data set split to generate features for. One of "train", "test", or "validation", so long as random_split_seed is not None. Set to None in this situation.
+            repeat (int): number of times to augment the data set.
+
         Yields:
             (ndarray): the spectrogram of an augmented audio clip
         """
-        if split is None:
-            for clip in self.clips:
-                audio = clip["audio"]["array"]
+        for i in range(repeat):
+            if split is None:
+                for clip in self.clips:
+                    audio = clip["audio"]["array"]
 
-                yield self.generate_augmented_spectrogram(audio)
-        else:
-            for i in range(repeat):
+                    yield self.generate_augmented_spectrogram(audio)
+            else:
                 for clip in self.split_clips[split]:
                     audio = clip["audio"]["array"]
 
@@ -466,24 +475,40 @@ class ClipsHandler:
 
         dat = np.zeros(self.desired_samples)
 
-        if self.max_start_time_from_right_s is not None:
-            max_samples_from_end = int(self.max_start_time_from_right_s * sr)
-        elif self.max_jitter_s is not None:
-            max_samples_from_end = len(x) + int(self.max_jitter_s * sr)
+        if len(x) < self.desired_samples:
+            if self.max_start_time_from_right_s is not None:
+                max_samples_from_end = int(self.max_start_time_from_right_s * sr)
+            elif self.max_jitter_s is not None:
+                max_samples_from_end = len(x) + int(self.max_jitter_s * sr)
+            else:
+                max_samples_from_end = self.desired_samples
+
+            assert max_samples_from_end > len(x)
+
+            samples_from_end = np.random.randint(len(x), max_samples_from_end) + 1
+
+            dat[-samples_from_end : -samples_from_end + len(x)] = x
+        elif len(x) > self.desired_samples:
+            samples_from_start = np.random.randint(0, len(x)-self.desired_samples)
+            dat = x[samples_from_start:]
         else:
-            max_samples_from_end = self.desired_samples
-
-        assert max_samples_from_end > len(x)
-
-        samples_from_end = np.random.randint(len(x), max_samples_from_end) + 1
-
-        dat[-samples_from_end : -samples_from_end + len(x)] = x
+            dat = x
 
         return dat
 
-    def truncate_clip(self, x, sr=16000):
-        desired_samples = int(self.truncate_clip_s * sr)
+    def truncate_clip(self, x, sr=16000, duration_s=None):
+        if duration_s is not None:
+            desired_samples = int(duration_s * sr)
+        else:
+            desired_samples = int(self.truncate_clip_s * sr)
         if len(x) > desired_samples:
             rn = np.random.randint(0, x.shape[0] - desired_samples)
             x = x[rn:rn + desired_samples]
+        return x
+
+    def repeat_clip(self, x, sr=16000):
+        original_clip = x
+        desired_samples = int(self.repeat_clip_min_duration_s * sr)
+        while x.shape[0] < desired_samples:
+            x=np.append(x,original_clip)
         return x
