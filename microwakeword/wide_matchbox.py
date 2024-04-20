@@ -204,17 +204,20 @@ def resnet_block(
         branch1 = tf.keras.layers.BatchNormalization(scale=scale)(branch1)
         branch1 = tf.keras.layers.Activation(activation)(branch1)
 
-    branch2 = stream.Stream(
-        tf.keras.layers.DepthwiseConv2D(
-            kernel_size=(kernel_size, 1),
-            strides=(stride, stride),
-            padding="valid",
-            dilation_rate=(dilation, 1),
-            use_bias=False,
-        ),
-        use_one_step=use_one_step,
-        pad_time_dim=padding,
-    )(net)
+    if kernel_size > 1:
+        branch2 = stream.Stream(
+            tf.keras.layers.DepthwiseConv2D(
+                kernel_size=(kernel_size, 1),
+                strides=(stride, stride),
+                padding="valid",
+                dilation_rate=(dilation, 1),
+                use_bias=False,
+            ),
+            use_one_step=use_one_step,
+            pad_time_dim=padding,
+        )(net)
+    else:
+        branch2 = net
     # Conv1D 1x1 - streamable by default
     branch2 = tf.keras.layers.Conv2D(
         filters=filters, kernel_size=1, use_bias=False, padding="valid"
