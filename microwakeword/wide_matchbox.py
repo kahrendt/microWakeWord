@@ -54,10 +54,22 @@ def model_parameters(parser_nn):
         help="Percentage of data dropped",
     )
     parser_nn.add_argument(
+        "--dropout_final_layer",
+        type=float,
+        default=0.0,
+        help="Percentage of data dropped before final convolution layer",
+    )
+    parser_nn.add_argument(
         "--ds_filters",
         type=str,
         default="128, 64, 64, 64, 128, 128",
-        help="Number of filters in every residual block",
+        help="Number of filters in every residual block's branch pointwise convolutions",
+    )
+    parser_nn.add_argument(
+        "--ds_filters2",
+        type=str,
+        default="128, 64, 64, 64, 128, 128",
+        help="Number of filters in every residual block's final pointwise convolution",
     )
     parser_nn.add_argument(
         "--ds_repeat",
@@ -66,17 +78,10 @@ def model_parameters(parser_nn):
         help="Number of repeating conv blocks inside of residual block",
     )
     parser_nn.add_argument(
-        "--ds_filter_separable",
-        type=str,
-        default="1, 1, 1, 1, 1, 1",
-        help="If 1 - use separable filter: depthwise conv in time and 1x1 conv "
-        "If 0 - use conv filter in time",
-    )
-    parser_nn.add_argument(
         "--ds_residual",
         type=str,
         default="0, 1, 1, 1, 0, 0",
-        help="Apply/not apply residual connection in residual block",
+        help="Apply/not apply branching in the residual block residual block",
     )
     parser_nn.add_argument(
         "--ds_padding",
@@ -124,7 +129,7 @@ def model_parameters(parser_nn):
         "--max_pool",
         type=int,
         default=0,
-        help="apply max pool before final convolution and sigmoid activation",
+        help="apply max pool instead of aver4age pool before final convolution and sigmoid activation",
     )
 
 
@@ -139,15 +144,64 @@ def spectrogram_slices_dropped(flags):
     """
     spectrogram_slices_dropped = 0
 
-    for kernel_size, dilation, residual in zip(
-        parse(flags.ds_kernel_size), parse(flags.ds_dilation), parse(flags.ds_residual)
+    for kernel_size, dilation, residual, repeat in zip(
+        parse(flags.ds_kernel_size),
+        parse(flags.ds_dilation),
+        parse(flags.ds_residual),
+        parse(flags.ds_repeat),
     ):
         if residual:
-            spectrogram_slices_dropped += 2 * dilation * (kernel_size - 1)
+            spectrogram_slices_dropped += (repeat - 1) * dilation * (kernel_size - 1)
         else:
             spectrogram_slices_dropped += dilation * (kernel_size - 1)
 
     return spectrogram_slices_dropped
+
+
+def depthwise_branch_block(
+    inputs,
+    repeat,
+    kernel_size,
+    filters,
+    dilation,
+    stride,
+    flags,
+    dropout,
+    padding="valid",
+):
+    activation = flags.activation
+    scale = flags.ds_scale
+
+    branch = inputs
+
+    if repeat > 0:
+        for _ in range(repeat):
+            branch = stream.Stream(
+                tf.keras.layers.DepthwiseConv2D(
+                    kernel_size=(kernel_size, 1),
+                    strides=(stride, stride),
+                    padding="valid",
+                    dilation_rate=(dilation, 1),
+                    use_bias=False,
+                ),
+                use_one_step=False,
+                pad_time_dim=padding,
+            )(branch)
+            branch = tf.keras.layers.Conv2D(
+                filters=filters, kernel_size=1, use_bias=False, padding="same"
+            )(branch)
+            branch = tf.keras.layers.BatchNormalization(scale=scale)(branch)
+            branch = tf.keras.layers.Activation(activation)(branch)
+            branch = tf.keras.layers.SpatialDropout2D(rate=dropout)(branch)
+    else:
+        branch = tf.keras.layers.Conv2D(
+            filters=filters, kernel_size=1, use_bias=False, padding="same"
+        )(branch)
+        branch = tf.keras.layers.BatchNormalization(scale=scale)(branch)
+        branch = tf.keras.layers.Activation(activation)(branch)
+        branch = tf.keras.layers.SpatialDropout2D(rate=dropout)(branch)
+
+    return branch
 
 
 def resnet_block(
@@ -155,12 +209,12 @@ def resnet_block(
     repeat,
     kernel_size,
     filters,
+    filters2,
     dilation,
     stride,
-    filter_separable,
     flags,
     residual=False,
-    padding="same",
+    padding="valid",
 ):
     """Residual block.
 
@@ -192,96 +246,43 @@ def resnet_block(
     dropout = flags.dropout
     activation = flags.activation
     scale = flags.ds_scale  # apply scaling in batchnormalization layer
-    use_one_step = False  # used for streaming only
 
     net = inputs
 
     if residual:
-        # Conv1D 1x1 - streamable by default
-        branch1 = tf.keras.layers.Conv2D(
-            filters=filters, kernel_size=1, use_bias=False, padding="valid"
-        )(net)
-        branch1 = tf.keras.layers.BatchNormalization(scale=scale)(branch1)
-        branch1 = tf.keras.layers.Activation(activation)(branch1)
+        branches = []
+        for branch_repeat in range(repeat):
+            branch = net
+            pointwise_filters = filters
+            branch = depthwise_branch_block(
+                branch,
+                branch_repeat,
+                kernel_size,
+                pointwise_filters,
+                dilation,
+                stride,
+                flags,
+                dropout,
+                padding,
+            )
+            branches.append(branch)
 
-    if kernel_size > 1:
-        branch2 = stream.Stream(
-            tf.keras.layers.DepthwiseConv2D(
-                kernel_size=(kernel_size, 1),
-                strides=(stride, stride),
-                padding="valid",
-                dilation_rate=(dilation, 1),
-                use_bias=False,
-            ),
-            use_one_step=use_one_step,
-            pad_time_dim=padding,
-        )(net)
-    else:
-        branch2 = net
-    # Conv1D 1x1 - streamable by default
-    branch2 = tf.keras.layers.Conv2D(
-        filters=filters, kernel_size=1, use_bias=False, padding="valid"
-    )(branch2)
-    branch2 = tf.keras.layers.BatchNormalization(scale=scale)(branch2)
-    branch2 = tf.keras.layers.Activation(activation)(branch2)
+        dropped_branches = []
+        for branch in branches:
+            features_drop = branch.shape[1] - branches[-1].shape[1]
+            dropped_branches.append(strided_drop.StridedDrop(features_drop)(branch))
 
-    if residual:
-        branch3 = stream.Stream(
-            tf.keras.layers.DepthwiseConv2D(
-                kernel_size=(kernel_size, 1),
-                strides=(stride, stride),
-                padding="valid",
-                dilation_rate=(dilation, 1),
-                use_bias=False,
-            ),
-            use_one_step=use_one_step,
-            pad_time_dim=padding,
-        )(net)
-        # Conv1D 1x1 - streamable by default
-        branch3 = tf.keras.layers.Conv2D(
-            filters=filters, kernel_size=1, use_bias=False, padding="valid"
-        )(branch3)
-        branch3 = tf.keras.layers.BatchNormalization(scale=scale)(branch3)
-        branch3 = tf.keras.layers.Activation(activation)(branch3)
-
-        branch3 = stream.Stream(
-            tf.keras.layers.DepthwiseConv2D(
-                kernel_size=(kernel_size, 1),
-                strides=(stride, stride),
-                padding="valid",
-                dilation_rate=(dilation, 1),
-                use_bias=False,
-            ),
-            use_one_step=use_one_step,
-            pad_time_dim=padding,
-        )(branch3)
-        # Conv1D 1x1 - streamable by default
-        branch3 = tf.keras.layers.Conv2D(
-            filters=filters, kernel_size=1, use_bias=False, padding="valid"
-        )(branch3)
-        branch3 = tf.keras.layers.BatchNormalization(scale=scale)(branch3)
-        branch3 = tf.keras.layers.Activation(activation)(branch3)
-
-        branch1_drop_layer = strided_drop.StridedDrop(
-            branch1.shape[1] - branch3.shape[1]
-        )
-        branch1 = branch1_drop_layer(branch1)
-
-        branch2_drop_layer = strided_drop.StridedDrop(
-            branch2.shape[1] - branch3.shape[1]
-        )
-        branch2 = branch2_drop_layer(branch2)
-
-    if residual:
-        net = tf.keras.layers.concatenate([branch1, branch2, branch3])
+        net = tf.keras.layers.concatenate(dropped_branches)
         net = tf.keras.layers.Conv2D(
-            filters=filters, kernel_size=1, use_bias=False, padding="valid"
+            filters=filters2, kernel_size=1, use_bias=False, padding="same"
         )(net)
         net = tf.keras.layers.BatchNormalization(scale=scale)(net)
-        net = tf.keras.layers.Activation(activation)(net)        
+        net = tf.keras.layers.Activation(activation)(net)
     else:
-        net = branch2
-        
+        net = depthwise_branch_block(
+            net, repeat, kernel_size, filters, dilation, stride, flags, dropout, padding
+        )
+
     return net
 
 
@@ -301,6 +302,7 @@ def model(flags, shape, batch_size):
     """
 
     ds_filters = parse(flags.ds_filters)
+    ds_filters2 = parse(flags.ds_filters2)
     ds_repeat = parse(flags.ds_repeat)
     ds_kernel_size = parse(flags.ds_kernel_size)
     ds_stride = parse(flags.ds_stride)
@@ -308,9 +310,10 @@ def model(flags, shape, batch_size):
     ds_residual = parse(flags.ds_residual)
     ds_pool = parse(flags.ds_pool)
     ds_padding = parse(flags.ds_padding)
-    ds_filter_separable = parse(flags.ds_filter_separable)
 
     for l in (
+        ds_filters,
+        ds_filters2,
         ds_repeat,
         ds_kernel_size,
         ds_stride,
@@ -318,7 +321,6 @@ def model(flags, shape, batch_size):
         ds_residual,
         ds_pool,
         ds_padding,
-        ds_filter_separable,
     ):
         if len(ds_filters) != len(l):
             raise ValueError("all input lists have to be the same length")
@@ -333,19 +335,19 @@ def model(flags, shape, batch_size):
     net = tf.keras.backend.expand_dims(net, axis=2)
 
     # encoder
-    for filters, repeat, ksize, stride, sep, dilation, res, pool, pad in zip(
+    for filters, filters2, repeat, ksize, stride, dilation, res, pool, pad in zip(
         ds_filters,
+        ds_filters2,
         ds_repeat,
         ds_kernel_size,
         ds_stride,
-        ds_filter_separable,
         ds_dilation,
         ds_residual,
         ds_pool,
         ds_padding,
     ):
         net = resnet_block(
-            net, repeat, ksize, filters, dilation, stride, sep, flags, res, pad
+            net, repeat, ksize, filters, filters2, dilation, stride, flags, res, pad
         )
 
         if pool > 1:
@@ -358,26 +360,23 @@ def model(flags, shape, batch_size):
                     pool_size=(pool, 1), strides=(pool, 1)
                 )(net)
 
-    # final_drop_layer = strided_drop.StridedDrop(
-    #     net.shape[1] - (79-29)
-    # )
-    # net = final_drop_layer(net)
-    
-    # net = stream.Stream(cell=tf.keras.layers.Flatten())(net)
-
-    # net = tf.keras.layers.Dense(1, activation="sigmoid")(net)    
-
+    # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regulr pooling operations
     if net.shape[1] > 1:
-        tf.transpose(net, perm=[0,1,3,2])
+        tf.transpose(net, perm=[0, 1, 3, 2])
         if flags.max_pool:
-            net = stream.Stream(cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1],1)))(net)
+            net = stream.Stream(
+                cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
+            )(net)
         else:
-            net = stream.Stream(cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1],1)))(net)        
-        tf.transpose(net, perm=[0,1,3,2])
+            net = stream.Stream(
+                cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
+            )(net)
+        tf.transpose(net, perm=[0, 1, 3, 2])
 
+    net = tf.keras.layers.Dropout(rate=flags.dropout_final_layer)(net)
     net = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)(net)
 
-    net = tf.squeeze(net, [1,2])
-    net = tf.keras.layers.Activation('sigmoid')(net)
+    net = tf.squeeze(net, [1, 2])
+    net = tf.keras.layers.Activation("sigmoid")(net)
 
     return tf.keras.Model(input_audio, net)
