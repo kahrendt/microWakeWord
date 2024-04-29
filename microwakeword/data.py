@@ -148,6 +148,7 @@ def fixed_length_spectrogram(
         fixed length spectrogram after truncating or padding
     """
     data_length = spectrogram.shape[0]
+    features_offset = 0
     if data_length > features_length:
         if truncation_strategy == "random":
             features_offset = np.random.randint(0, data_length - features_length)
