@@ -61,71 +61,53 @@ def model_parameters(parser_nn):
         help="Percentage of data dropped before final convolution layer",
     )
     parser_nn.add_argument(
-        "--ds_filters",
+        "--pointwise_filters",
         type=str,
-        default="128, 64, 64, 64, 128, 128",
+        default="8, 12, 16, 20",
         help="Number of filters in every residual block's branch pointwise convolutions",
     )
     parser_nn.add_argument(
-        "--ds_filters2",
+        "--repeat_in_block",
         type=str,
-        default="128, 64, 64, 64, 128, 128",
-        help="Number of filters in every residual block's final pointwise convolution",
-    )
-    parser_nn.add_argument(
-        "--ds_repeat",
-        type=str,
-        default="1, 1, 1, 1, 1, 1",
+        default="2,2,4,4",
         help="Number of repeating conv blocks inside of residual block",
     )
     parser_nn.add_argument(
-        "--ds_residual",
+        "--mixconv_kernel_sizes",
         type=str,
-        default="0, 1, 1, 1, 0, 0",
-        help="Apply/not apply branching in the residual block residual block",
-    )
-    parser_nn.add_argument(
-        "--ds_padding",
-        type=str,
-        default="'valid', 'valid', 'valid', 'valid', 'valid', 'valid'",
-        help="padding can be same or causal, causal should be used for streaming",
-    )
-    parser_nn.add_argument(
-        "--ds_kernel_size",
-        type=str,
-        default="11, 13, 15, 17, 29, 1",
+        default="[3], [3,5], [3,5,7], [3,5,7,9]",
         help="Kernel size of DepthwiseConv1D in time dim for every residual block",
     )
-    parser_nn.add_argument(
-        "--ds_stride",
-        type=str,
-        default="1, 1, 1, 1, 1, 1",
-        help="stride value in time dim of DepthwiseConv1D for residual block",
-    )
-    parser_nn.add_argument(
-        "--ds_dilation",
-        type=str,
-        default="1, 1, 1, 1, 2, 1",
-        help="dilation value of DepthwiseConv1D for every residual block",
-    )
-    parser_nn.add_argument(
-        "--ds_pool",
-        type=str,
-        default="1, 1, 1, 1, 1, 1",
-        help="Apply pooling after every residual block: pooling size",
-    )
-    parser_nn.add_argument(
-        "--ds_max_pool",
-        type=int,
-        default=0,
-        help="Pooling type: 0 - average pooling; 1 - max pooling",
-    )
-    parser_nn.add_argument(
-        "--ds_scale",
-        type=int,
-        default=1,
-        help="apply scaling in batch normalization layer",
-    )
+    # parser_nn.add_argument(
+    #     "--ds_stride",
+    #     type=str,
+    #     default="1, 1, 1, 1, 1, 1",
+    #     help="stride value in time dim of DepthwiseConv1D for residual block",
+    # )
+    # parser_nn.add_argument(
+    #     "--ds_dilation",
+    #     type=str,
+    #     default="1, 1, 1, 1, 2, 1",
+    #     help="dilation value of DepthwiseConv1D for every residual block",
+    # )
+    # parser_nn.add_argument(
+    #     "--ds_pool",
+    #     type=str,
+    #     default="1, 1, 1, 1, 1, 1",
+    #     help="Apply pooling after every residual block: pooling size",
+    # )
+    # parser_nn.add_argument(
+    #     "--ds_max_pool",
+    #     type=int,
+    #     default=0,
+    #     help="Pooling type: 0 - average pooling; 1 - max pooling",
+    # )
+    # parser_nn.add_argument(
+    #     "--ds_scale",
+    #     type=int,
+    #     default=1,
+    #     help="apply scaling in batch normalization layer",
+    # )
     parser_nn.add_argument(
         "--max_pool",
         type=int,
@@ -149,18 +131,16 @@ def spectrogram_slices_dropped(flags):
     Returns:
         int: number of spectrogram slices dropped
     """
-    spectrogram_slices_dropped = 4  # initial 5x5 convolution drops 4
+    spectrogram_slices_dropped = 80  # initial 5x5 convolution drops 4
 
-    for kernel_size, dilation, residual, repeat in zip(
-        parse(flags.ds_kernel_size),
-        parse(flags.ds_dilation),
-        parse(flags.ds_residual),
-        parse(flags.ds_repeat),
-    ):
-        if residual:
-            spectrogram_slices_dropped += (repeat - 1) * dilation * (kernel_size - 1)
-        else:
-            spectrogram_slices_dropped += dilation * (kernel_size - 1)
+    # for kernel_size, dilation, residual, repeat in zip(
+    #     parse(flags.mixconv_kernel_sizes),
+    #     parse(flags.repeat_in_block),
+    # ):
+    #     if residual:
+    #         spectrogram_slices_dropped += (repeat - 1) * (kernel_size - 1)
+    #     else:
+    #         spectrogram_slices_dropped +=  (kernel_size - 1)
 
     return spectrogram_slices_dropped
 
@@ -362,11 +342,10 @@ class MixConv(object):
         filters = _get_shape_value(inputs.shape[self._channel_axis])
         splits = _split_channels(filters, len(self._convs))
         x_splits = tf.split(inputs, splits, self._channel_axis)
-        # print(x_splits)
+
         x_outputs = [c(x) for x, c in zip(x_splits, self._convs)]
         for i, output in enumerate(x_outputs):
             features_drop = output.shape[1] - x_outputs[-1].shape[1]
-            # print(features_drop)
             x_outputs[i] = strided_drop.StridedDrop(features_drop)(output)
         
         x = tf.concat(x_outputs, self._channel_axis)
@@ -388,28 +367,19 @@ def model(flags, shape, batch_size):
       Keras model for training
     """
 
-    ds_filters = parse(flags.ds_filters)
-    ds_filters2 = parse(flags.ds_filters2)
-    ds_repeat = parse(flags.ds_repeat)
-    ds_kernel_size = parse(flags.ds_kernel_size)
-    ds_stride = parse(flags.ds_stride)
-    ds_dilation = parse(flags.ds_dilation)
-    ds_residual = parse(flags.ds_residual)
-    ds_pool = parse(flags.ds_pool)
-    ds_padding = parse(flags.ds_padding)
+    pointwise_filters = parse(flags.pointwise_filters)
+    repeat_in_block = parse(flags.repeat_in_block)
+    mixconv_kernel_sizes = parse(flags.mixconv_kernel_sizes)
+    # ds_stride = parse(flags.ds_stride)
+    # ds_dilation = parse(flags.ds_dilation)
+    # ds_pool = parse(flags.ds_pool)
 
     for l in (
-        ds_filters,
-        ds_filters2,
-        ds_repeat,
-        ds_kernel_size,
-        ds_stride,
-        ds_dilation,
-        ds_residual,
-        ds_pool,
-        ds_padding,
+        pointwise_filters,
+        repeat_in_block,
+        mixconv_kernel_sizes,
     ):
-        if len(ds_filters) != len(l):
+        if len(pointwise_filters) != len(l):
             raise ValueError("all input lists have to be the same length")
 
     input_audio = tf.keras.layers.Input(
@@ -433,32 +403,33 @@ def model(flags, shape, batch_size):
     
     net = tf.keras.layers.Activation("relu")(net)
 
-
     # encoder
-    for filters, filters2, repeat, ksize, stride, dilation, res, pool, pad in zip(
-        ds_filters,
-        ds_filters2,
-        ds_repeat,
-        ds_kernel_size,
-        ds_stride,
-        ds_dilation,
-        ds_residual,
-        ds_pool,
-        ds_padding,
+    for filters, repeat, ksize in zip(
+        pointwise_filters,
+        repeat_in_block,
+        mixconv_kernel_sizes,
     ):  
-        residual = net
-        # print(net.shape)
-        net = MixConv(kernel_size = [3,5,7,9],strides=[1,1])(net)
-        # print(net.shape)
-        net = tf.keras.layers.Conv2D(
-            filters=filters, kernel_size=1, use_bias=False, padding="same"
-        )(net)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation("relu")(net)
-
-        if res:
-            residual = strided_drop.StridedDrop(residual.shape[1]-net.shape[1])(residual)            
+        if net.shape[3] != filters:
+            net = tf.keras.layers.Conv2D(
+                filters=filters, kernel_size=1, use_bias=False, padding="same"
+            )(net)
+            net = tf.keras.layers.BatchNormalization()(net)
+            net = tf.keras.layers.Activation("relu")(net)
+        
+        for _ in range(repeat):
+            residual = net
+            
+            net = MixConv(kernel_size = ksize,strides=[1,1])(net)
+            net = tf.keras.layers.Conv2D(
+                filters=filters, kernel_size=1, use_bias=False, padding="same"
+            )(net)
+            net = tf.keras.layers.BatchNormalization()(net)
+            net = tf.keras.layers.Activation("relu")(net)
+            
+            residual = strided_drop.StridedDrop(residual.shape[1]-net.shape[1])(residual)        
             net = net + residual
+            
+            
     # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regular pooling operations
     if net.shape[1] > 1:
         if flags.max_pool:
