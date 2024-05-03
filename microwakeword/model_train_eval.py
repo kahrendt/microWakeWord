@@ -27,7 +27,9 @@ import microwakeword.utils as utils
 import microwakeword.ds_tc_resnet as ds_tc_resnet
 import microwakeword.inception as inception
 import microwakeword.wide_matchbox as wide_matchbox
+import microwakeword.bc_wide_matchbox as bc_wide_matchbox
 import microwakeword.xception as xception
+import microwakeword.mixednet as mixednet
 
 from microwakeword.layers import modes
 
@@ -349,9 +351,14 @@ if __name__ == "__main__":
     # wide_matchbox model settings
     parser_wide_matchbox = subparsers.add_parser("wide_matchbox")
     wide_matchbox.model_parameters(parser_wide_matchbox)
+    # bc_wide_matchbox model settings
+    parser_bc_wide_matchbox = subparsers.add_parser("bc_wide_matchbox")
+    bc_wide_matchbox.model_parameters(parser_bc_wide_matchbox)
     # xception model settings
     parser_xception = subparsers.add_parser("xception")
     xception.model_parameters(parser_xception)
+    parser_mixednet = subparsers.add_parser("mixednet")
+    mixednet.model_parameters(parser_mixednet)
 
     flags, unparsed = parser.parse_known_args()
     if unparsed:
@@ -365,8 +372,12 @@ if __name__ == "__main__":
         model_module = inception
     elif flags.model_name == "wide_matchbox":
         model_module = wide_matchbox
+    elif flags.model_name == "bc_wide_matchbox":
+        model_module = bc_wide_matchbox
     elif flags.model_name == "xception":
         model_module = xception
+    elif flags.model_name == "mixednet":
+        model_module = mixednet
     else:
         raise ValueError("Unknown model type: {}".format(flags.model_name))
 
