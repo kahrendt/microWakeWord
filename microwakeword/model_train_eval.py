@@ -162,6 +162,12 @@ def evaluate_model(
             "stream_state_internal",
             modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
         )
+        # utils.model_to_tflite(
+        #     model,
+        #     config,
+        #     "tflite_stream_state_external",
+        #     modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
+        # )
 
     if test_tf_nonstreaming:
         logging.info("Testing nonstreaming model")
@@ -401,7 +407,10 @@ if __name__ == "__main__":
         or flags.test_tflite_streaming
         or flags.test_tflite_streaming_quantized
     ):
+        # import tensorflow as tf
+        # tf.compat.v1.disable_eager_execution()
         model = model_module.model(
+            # flags, shape=[1,40], batch_size=1
             flags, shape=config["training_input_shape"], batch_size=1
         )
 
