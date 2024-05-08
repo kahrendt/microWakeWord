@@ -24,7 +24,7 @@ import numpy as np
 from absl import logging
 from pathlib import Path
 from mmap_ninja.ragged import RaggedMmap
-
+from microwakeword.feature_generation import ClipsHandler
 
 def mixup_augment(
     spectrogram_1, truth_1, weight_1, spectrogram_2, truth_2, weight_2, mix_ratio
@@ -244,37 +244,72 @@ class FeatureHandler(object):
             duration = 0.0
             count = 0
 
-            search_path_directory = os.path.join(data_dir, set_index)
-            search_path = [
-                str(i)
-                for i in Path(os.path.abspath(search_path_directory)).glob("**/*_mmap/")
-            ]
-
-            for mmap_path in search_path:
-                imported_features = RaggedMmap(mmap_path)
-
-                feature_dict["loaded_features"].append(imported_features)
-                feature_index = len(feature_dict["loaded_features"]) - 1
-
-                for i in range(0, len(imported_features)):
+            if feature_dict['type'] == "clips":
+                if set_index == "training":
+                    feature_dict["loaded_features"].append(ClipsHandler(
+                                input_path=data_dir,
+                                input_glob=feature_dict["input_glob"],
+                                impulse_paths=feature_dict["impulse_paths"],
+                                background_paths=feature_dict["background_paths"], 
+                                augmentation_probabilities = feature_dict["augmentation_probabilities"],
+                                augmented_duration_s =feature_dict["augmented_duration_s"],
+                                max_start_time_from_right_s = None,
+                                max_jitter_s = feature_dict["max_jitter_s"],
+                                max_clip_duration_s = feature_dict["max_clip_duration_s"], 
+                                min_clip_duration_s = None,
+                                remove_silence=False,
+                                truncate_clip_s=None,
+                                repeat_clip_min_duration_s=None,
+                                split_spectrogram_duration_s=None,
+                            )
+                    )
                     feature_dict[set_index].append(
                         {
-                            "loaded_feature_index": feature_index,
-                            "subindex": i,
+                            "loaded_feature_index": 0,
+                            "subindex": 0,
                         }
-                    )
+                    )                 
+                    feature_dict["stats"][set_index] = {
+                        "spectrogram_count": len(feature_dict['loaded_features'][-1].clips),
+                        "total_duration": 0.0,
+                    }
+                else:            
+                    feature_dict["stats"][set_index] = {
+                        "spectrogram_count": 0,
+                        "total_duration": 0.0,
+                    }                    
+            elif feature_dict['type'] == "mmap":
+                search_path_directory = os.path.join(data_dir, set_index)
+                search_path = [
+                    str(i)
+                    for i in Path(os.path.abspath(search_path_directory)).glob("**/*_mmap/")
+                ]
 
-                    duration += (
-                        0.02 * imported_features[i].shape[0]
-                    )  # Each feature represents 0.02 seconds of audio
-                    count += 1
+                for mmap_path in search_path:
+                    imported_features = RaggedMmap(mmap_path)
 
-            random.shuffle(feature_dict[set_index])
+                    feature_dict["loaded_features"].append(imported_features)
+                    feature_index = len(feature_dict["loaded_features"]) - 1
 
-            feature_dict["stats"][set_index] = {
-                "spectrogram_count": count,
-                "total_duration": duration,
-            }
+                    for i in range(0, len(imported_features)):
+                        feature_dict[set_index].append(
+                            {
+                                "loaded_feature_index": feature_index,
+                                "subindex": i,
+                            }
+                        )
+
+                        duration += (
+                            0.02 * imported_features[i].shape[0]
+                        )  # Each feature represents 0.02 seconds of audio
+                        count += 1
+
+                random.shuffle(feature_dict[set_index])
+
+                feature_dict["stats"][set_index] = {
+                    "spectrogram_count": count,
+                    "total_duration": duration,
+                }
 
     def get_mode_duration(self, mode):
         """Returns the durations of all spectrogram features in the given mode.
@@ -407,10 +442,13 @@ class FeatureHandler(object):
 
             for i in range(sample_count):
                 feature_set_1 = random_feature_sets[i]
-                feature_1 = random.choice(feature_set_1["training"])
-                spectrogram_1 = feature_set_1["loaded_features"][
-                    feature_1["loaded_feature_index"]
-                ][feature_1["subindex"]]
+                if feature_set_1['type'] == "mmap":
+                    feature_1 = random.choice(feature_set_1["training"])
+                    spectrogram_1 = feature_set_1["loaded_features"][
+                        feature_1["loaded_feature_index"]
+                    ][feature_1["subindex"]]
+                elif feature_set_1['type'] == "clips":
+                    spectrogram_1 = feature_set_1["loaded_features"][0].generate_random_augmented_spectrogram()
 
                 if truncation_strategy == "default":
                     truncation_strategy_1 = feature_set_1["truncation_strategy"]
