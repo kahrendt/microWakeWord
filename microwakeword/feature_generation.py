@@ -34,6 +34,8 @@ from tensorflow.lite.experimental.microfrontend.python.ops import (
 
 import webrtcvad
 
+import warnings
+
 def remove_silence(
     x: np.ndarray,
     frame_duration: float = 0.030,
@@ -142,6 +144,7 @@ class ClipsHandler:
             "TanhDistortion": 0.25,
             "PitchShift": 0.25,
             "BandStopFilter": 0.25,
+            "AddColorNoise": 0.25,
             "AddBackgroundNoise": 0.75,
             "Gain": 1.0,
             "RIR": 0.5,
@@ -155,7 +158,9 @@ class ClipsHandler:
         truncate_clip_s=None,
         random_split_seed=None,
         split_count=200,  
-        repeat_clip_min_duration_s=None,      
+        repeat_clip_min_duration_s=None,
+        split_spectrogram_duration_s=None,
+        truncate_spectrogram_duration_s=None,
     ):
         #######################
         # Setup augmentations #
@@ -205,6 +210,11 @@ class ClipsHandler:
                 audiomentations.BandStopFilter(
                     p=augmentation_probabilities["BandStopFilter"]
                 ),
+                audiomentations.AddColorNoise(
+                    p=augmentation_probabilities["AddColorNoise"],
+                    min_snr_db=10,
+                    max_snr_db=30,
+                ),
                 background_noise_augment,
                 audiomentations.OneOf(
                     transforms=[
@@ -222,7 +232,7 @@ class ClipsHandler:
                 ),
                 reverb_augment,
             ],
-            shuffle=True,
+            shuffle=False,
         )
 
         #####################################################
@@ -353,6 +363,8 @@ class ClipsHandler:
         self.remove_silence = remove_silence
         self.truncate_clip_s = truncate_clip_s
         self.repeat_clip_min_duration_s = repeat_clip_min_duration_s
+        self.split_spectrogram_duration_s = split_spectrogram_duration_s
+        self.truncate_spectrogram_duration_s = truncate_spectrogram_duration_s
 
     def augment_clip(self, input_audio):
         """Augments the input audio, optionally creating a fixed sized clip first.
@@ -374,7 +386,10 @@ class ClipsHandler:
         
         if self.augmented_duration_s is not None:
             input_audio = self.create_fixed_size_clip(input_audio)
-        output_audio = self.augment(input_audio, sample_rate=16000)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore") # Suppresses warning about background clip being too quiet... TODO: find better approach!
+            output_audio = self.augment(input_audio, sample_rate=16000)
 
         return (output_audio * 32767).astype(np.int16)
 
@@ -412,14 +427,14 @@ class ClipsHandler:
         augmented_audio = self.augment_clip(input_audio)
         return generate_features_for_clip(augmented_audio)
 
-    def generate_random_augmented_feature(self):
+    def generate_random_augmented_spectrogram(self):
         """Generates the spectrogram of a random audio clip after augmenting.
 
         Returns:
             (ndarray): the spectrogram of the augmented audio from a random clip
         """
         rand_augmented_clip = self.augment_random_clip()
-        return self.generate_augmented_feature(rand_augmented_clip)
+        return generate_features_for_clip(rand_augmented_clip)
 
     def augmented_features_generator(self, split=None, repeat=1):
         """Generator function for augmenting all loaded clips and computing their spectrograms
@@ -431,17 +446,28 @@ class ClipsHandler:
         Yields:
             (ndarray): the spectrogram of an augmented audio clip
         """
-        for i in range(repeat):
-            if split is None:
-                for clip in self.clips:
-                    audio = clip["audio"]["array"]
+        if split is None:
+            clip_list = self.clips
+        else:
+            clip_list = self.split_clips[split]
+        for _ in range(repeat):
+            for clip in clip_list:
+                audio = clip["audio"]["array"]
 
-                    yield self.generate_augmented_spectrogram(audio)
-            else:
-                for clip in self.split_clips[split]:
-                    audio = clip["audio"]["array"]
+                spectrogram = self.generate_augmented_spectrogram(audio)
 
-                    yield self.generate_augmented_spectrogram(audio)
+                if self.split_spectrogram_duration_s is not None:
+                    desired_spectrogram_length = int(self.split_spectrogram_duration_s/0.02) # each window is 20 ms long
+                    if spectrogram.shape[0] > desired_spectrogram_length+20:
+                        for start_index in range(20, spectrogram.shape[0]-desired_spectrogram_length, desired_spectrogram_length):
+                            yield spectrogram[start_index:start_index+desired_spectrogram_length,:]
+                    else:
+                        yield spectrogram
+                elif self.truncate_spectrogram_duration_s is not None:
+                    desired_spectrogram_length = int(self.truncate_spectrogram_duration_s/0.02)
+                    yield spectrogram[-desired_spectrogram_length:]
+                else:
+                    yield spectrogram
 
 
     def save_augmented_features(self, mmap_output_dir, split=None, repeat=1):
