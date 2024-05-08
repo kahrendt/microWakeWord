@@ -32,7 +32,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         truncation_strategy="truncate_start",
     )
 
-    test_batch_size = 1000
+    test_batch_size = 1024
     
     model.reset_metrics()
     for i in range(0, len(testing_fingerprints), test_batch_size):
@@ -56,6 +56,8 @@ def validate_nonstreaming(config, data_processor, model, test_set):
 
     ambient_false_positives = 0  # float("nan")
     estimated_ambient_false_positives_per_hour = 0  # float("nan")
+    
+    recall_at_no_faph = 0
 
     if data_processor.get_mode_size("validation_ambient") > 0:
         (
@@ -69,19 +71,61 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             truncation_strategy="split",
         )
         model.reset_metrics()
+        
+        cutoffs = np.arange(0.5,1.01,0.01)
+        batch_sum_false_positives = np.zeros(cutoffs.shape[0])
+        
         for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
-            ambient_result = model.test_on_batch(
-                ambient_testing_fingerprints[i : i + test_batch_size],
-                ambient_testing_ground_truth[i : i + test_batch_size],
-                reset_metrics=False,
+            ambient_predictions = model.predict_on_batch(
+                ambient_testing_fingerprints[i : i + test_batch_size]
             )
+            
+            for index, cutoff in enumerate(cutoffs):
+                batch_sum_false_positives[index] += sum(ambient_predictions > cutoff)
+            # ambient_result = model.test_on_batch(
+            #     ambient_testing_fingerprints[i : i + test_batch_size],
+            #     ambient_testing_ground_truth[i : i + test_batch_size],
+            #     reset_metrics=False,
+            # )
 
-        ambient_false_positives = ambient_result[5]
+        # estimated_ambient_false_positives_per_hour = ambient_false_positives / (
+        #     data_processor.get_mode_duration("validation_ambient") / 3600.0
+        # )
 
-        estimated_ambient_false_positives_per_hour = ambient_false_positives / (
+        batch_sum_false_positives_per_hour = batch_sum_false_positives/ (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
         )
 
+        ambient_false_positives = batch_sum_false_positives[0]
+        estimated_ambient_false_positives_per_hour = batch_sum_false_positives_per_hour[0]
+        
+        target_faph_cutoff_probability = 1.0
+        for index, cutoff in enumerate(cutoffs):
+            if batch_sum_false_positives_per_hour[index] == 0:
+                target_faph_cutoff_probability = cutoff
+                break
+        
+        if target_faph_cutoff_probability < 1.0:
+            total_positive_sample_count = 0
+            total_predicted_at_cutoff = 0
+            for i in range(0, len(testing_fingerprints), test_batch_size):
+                predictions = model.predict_on_batch(
+                    testing_fingerprints[i : i + test_batch_size]
+                )
+                #     testing_ground_truth[i : i + test_batch_size],
+                #     reset_metrics=False,
+                # )        
+                total_positive_sample_count += sum(testing_ground_truth[i : i + test_batch_size])
+                total_predicted_at_cutoff += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > target_faph_cutoff_probability)
+            
+            recall_at_no_faph = total_predicted_at_cutoff[0]/total_positive_sample_count
+            # print(total_positive_sample_count, total_predicted_at_cutoff[0])
+            # print("Recall at 1 faph:", total_predicted_at_cutoff[0]/total_positive_sample_count, "cutoff level is", target_faph_cutoff_probability)
+
+        
+
+    metrics["recall_at_no_faph"] = recall_at_no_faph
+    metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
     metrics["ambient_false_positives"] = ambient_false_positives
     metrics["ambient_false_positives_per_hour"] = (
         estimated_ambient_false_positives_per_hour
@@ -166,6 +210,7 @@ def train(model, config, data_processor):
 
     best_minimization_quantity = 10000
     best_maximization_quantity = 0.0
+    best_no_faph_cutoff = 1.0
 
     for training_step in range(1, training_steps_max + 1):
         training_steps_sum = 0
@@ -258,9 +303,10 @@ def train(model, config, data_processor):
             )
             model.reset_metrics()   # reset metrics for next validation epoch of training
             logging.info(
-                "Step %d (nonstreaming): Validation accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f,",
+                "Step %d (nonstreaming): Validation: recall at no faph = %.3f, accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f,",
                 *(
                     training_step,
+                    nonstreaming_metrics["recall_at_no_faph"] * 100,
                     nonstreaming_metrics["accuracy"] * 100,
                     nonstreaming_metrics["recall"] * 100,
                     nonstreaming_metrics["precision"] * 100,
@@ -326,6 +372,7 @@ def train(model, config, data_processor):
             current_maximization_quantity = nonstreaming_metrics[
                 config["maximization_metric"]
             ]
+            current_no_faph_cutoff = nonstreaming_metrics["cutoff_for_no_faph"]
 
             # Save model weights if this is a new best model
             if (
@@ -361,15 +408,17 @@ def train(model, config, data_processor):
             ):
                 best_minimization_quantity = current_minimization_quantity
                 best_maximization_quantity = current_maximization_quantity
+                best_no_faph_cutoff = current_no_faph_cutoff
 
                 # overwrite the best model weights
                 model.save_weights(os.path.join(config["train_dir"], "best_weights"))
                 checkpoint.save(file_prefix=checkpoint_prefix)
 
             logging.info(
-                "So far the best minimization quantity is %.3f with best maximization quantity of %.5f%%",
+                "So far the best minimization quantity is %.3f with best maximization quantity of %.5f%%; no faph cutoff is %.2f",
                 best_minimization_quantity,
                 (best_maximization_quantity * 100),
+                best_no_faph_cutoff,
             )
 
     # Save checkpoint after training
