@@ -161,6 +161,7 @@ class ClipsHandler:
         repeat_clip_min_duration_s=None,
         split_spectrogram_duration_s=None,
         truncate_spectrogram_duration_s=None,
+        min_jitter_s=None,
     ):
         #######################
         # Setup augmentations #
@@ -253,6 +254,7 @@ class ClipsHandler:
                 max_clip_duration_s = min(max_clip_duration_s, augmented_duration_s)
 
         self.max_jitter_s = max_jitter_s
+        self.min_jitter_s = min_jitter_s
         self.max_start_time_from_right_s = max_start_time_from_right_s
         
         if self.max_jitter_s is not None and self.max_start_time_from_right_s is not None:
@@ -502,16 +504,20 @@ class ClipsHandler:
         dat = np.zeros(self.desired_samples)
 
         if len(x) < self.desired_samples:
+            min_samples_from_end = len(x)
             if self.max_start_time_from_right_s is not None:
                 max_samples_from_end = int(self.max_start_time_from_right_s * sr)
             elif self.max_jitter_s is not None:
+                if self.min_jitter_s is not None:
+                    min_samples_from_end = len(x) + int(self.min_jitter_s)*sr
                 max_samples_from_end = len(x) + int(self.max_jitter_s * sr)
             else:
                 max_samples_from_end = self.desired_samples
 
             assert max_samples_from_end > len(x)
 
-            samples_from_end = np.random.randint(len(x), max_samples_from_end) + 1
+            samples_from_end = np.random.randint(min_samples_from_end, max_samples_from_end) + 1
+            # samples_from_end = np.random.randint(len(x), max_samples_from_end) + 1
 
             dat[-samples_from_end : -samples_from_end + len(x)] = x
         elif len(x) > self.desired_samples:

@@ -255,6 +255,7 @@ class FeatureHandler(object):
                                 augmented_duration_s =feature_dict["augmented_duration_s"],
                                 max_start_time_from_right_s = None,
                                 max_jitter_s = feature_dict["max_jitter_s"],
+                                min_jitter_s = feature_dict["min_jitter_s"],
                                 max_clip_duration_s = feature_dict["max_clip_duration_s"], 
                                 min_clip_duration_s = None,
                                 remove_silence=False,
