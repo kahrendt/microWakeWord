@@ -166,6 +166,7 @@ class MixConv(object):
         self._channel_axis = -1
 
         self.ring_buffer_length = max(kernel_size)-1
+        
         self.kernel_sizes = kernel_size
 
     def __call__(self, inputs):
@@ -173,12 +174,18 @@ class MixConv(object):
         #   - There is some latency overhead on the esp devices for loading each ring buffer's data
         #   - This avoids variable's holding redundant information
         #   - Reduces the necessary size of the tensor arena
-        net = stream.Stream(
-            cell=tf.identity,
-            ring_buffer_size_in_time_dim=self.ring_buffer_length,
-            use_one_step=False,
-            # pad_time_dim=None,  mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
-        )(inputs)
+        if not training:
+            ring_buffer = tf.keras.layers.Input(shape=(inputs.shape[0],self.ring_buffer_length,inputs.shape[2],inputs.shape[3]))
+            net = tf.concat([ring_buffer, inputs], 1)
+            output_to_ring_buffer = net[:, 1, :, :]
+        else:
+            net = inputs
+            # net = stream.Stream(
+            #     cell=tf.identity,
+            #     ring_buffer_size_in_time_dim=self.ring_buffer_length,
+            #     use_one_step=False,
+            #     # pad_time_dim=None,  mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
+            # )(inputs)
 
         if len(self.kernel_sizes) == 1:
             return tf.keras.layers.DepthwiseConv2D(
