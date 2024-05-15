@@ -1258,6 +1258,7 @@ def reconstruct_from_config(config, custom_objects=None, created_layers=None):
         def _deserialize_keras_tensor(t):
             """Deserializes a single Keras Tensor passed to `call`."""
             if isinstance(t, tf_utils.ListWrapper):
+                print("islistwrapper")
                 t = t.as_list()
                 layer_name = t[0]
                 node_index = t[1]
@@ -1335,6 +1336,7 @@ def reconstruct_from_config(config, custom_objects=None, created_layers=None):
                 )
 
                 if inbound_node_index is None:
+                    # print("inbound_node_inxdex is none")
                     return False
                 inbound_node = inbound_layer._inbound_nodes[inbound_node_index]
                 input_tensors.append(
@@ -1454,7 +1456,7 @@ def reconstruct_from_config(config, custom_objects=None, created_layers=None):
             layer = created_layers[layer_data["name"]]
             if layer in unprocessed_nodes:
                 layer_nodes = unprocessed_nodes.pop(layer)
-                # print(len(unprocessed_nodes))
+                print(len(unprocessed_nodes))
                 while layer_nodes:
                     node_data = layer_nodes[0]
                     if process_node(layer, node_data):

@@ -38,19 +38,13 @@ def _set_mode(model, mode):
         config = layer.get_config()
         # for every layer set mode, if it has it
         if "mode" in config:
-            layer.mode = mode        
+            layer.mode = mode   
         # with any mode of inference - training is False  
         if "training" in config:
             layer.training = False
         if mode == modes.Modes.NON_STREAM_INFERENCE:
             if "unroll" in config:
                 layer.unroll = True
-        
-              
-            # layer.build(layer.get_input_shape())
-            # layer.build(layer.input_shape)
-            # print(layer.state_shape)
-            # layer.build(layer.state_shape)
 
     for layer in model.layers:
         _recursive_set_layer_mode(layer, mode)
@@ -187,6 +181,7 @@ def _clone_model(model, input_tensors):
     """Clone model with configs, except of weights."""
     new_input_layers = {}  # Cache for created layers.
     # pylint: disable=protected-access
+    print("starting to clone")
     if input_tensors is not None:
         # Make sure that all input tensors come from a Keras layer.
         input_tensors = tf.nest.flatten(input_tensors)
@@ -203,7 +198,7 @@ def _clone_model(model, input_tensors):
         )
     )
     # pylint: enable=protected-access
-    print("after")
+    print(created_layers)
 
     # Reconstruct model from the config, using the cloned layers.
     input_tensors, output_tensors, created_layers = (
@@ -239,10 +234,13 @@ def convert_to_inference_model(model, input_tensors, mode):
     """
 
     # tf.compat.v1.disable_eager_execution()
-    # print(input_tensors)
 
     # scope is introduced for simplifiyng access to weights by names
     scope_name = "streaming"
+    # input_tensors.append(tf.keras.layers.Input(
+    #     shape=(5,1,40), batch_size=1, dtype=tf.float32, name="streaming_input_1"
+    # ))
+    
     with tf.name_scope(scope_name):
         if not isinstance(model, tf.keras.Model):
             raise ValueError(
@@ -264,18 +262,20 @@ def convert_to_inference_model(model, input_tensors, mode):
             )
         # pylint: enable=protected-access
         model = _set_mode(model, mode)
+        print("preclone")
         new_model = tf.keras.models.clone_model(model, input_tensors)
         # new_model = _clone_model(model, input_tensors)
+    print("cloned")
 
     if mode == modes.Modes.STREAM_INTERNAL_STATE_INFERENCE:
         return _copy_weights(new_model, model)
     elif mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
-        input_states, output_states = _get_input_output_states(model)
-        # input_states, output_states = _get_input_output_states(new_model)
-        all_inputs = model.inputs + input_states
-        all_outputs = model.outputs + output_states
-        # all_inputs = new_model.inputs + input_states
-        # all_outputs = new_model.outputs + output_states
+        # input_states, output_states = _get_input_output_states(model)
+        input_states, output_states = _get_input_output_states(new_model)
+        # all_inputs = model.inputs + input_states
+        # all_outputs = model.outputs + output_states
+        all_inputs = new_model.inputs + input_states
+        all_outputs = new_model.outputs + output_states
         new_streaming_model = tf.keras.Model(all_inputs, all_outputs)
         new_streaming_model.input_shapes = _get_state_shapes(all_inputs)
         new_streaming_model.output_shapes = _get_state_shapes(all_outputs)
@@ -392,6 +392,7 @@ def model_to_saved(
 
     if mode not in (
         modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
+        modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
         modes.Modes.NON_STREAM_INFERENCE,
     ):
         raise ValueError("mode %s is not supported " % mode)
