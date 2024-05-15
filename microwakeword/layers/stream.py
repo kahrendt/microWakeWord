@@ -254,7 +254,10 @@ class Stream(tf.keras.layers.Layer):
                     0, dilation_rate[0] * (kernel_size[0] - 1) - (strides[0] - 1)
                 )
 
-        elif isinstance(wrapped_cell, (tf.keras.layers.AveragePooling2D, tf.keras.layers.MaxPooling2D)):
+        elif isinstance(
+            wrapped_cell,
+            (tf.keras.layers.AveragePooling2D, tf.keras.layers.MaxPooling2D),
+        ):
             strides = wrapped_cell.get_config()["strides"]
             pool_size = wrapped_cell.get_config()["pool_size"]
             self.stride = strides[0]
@@ -417,11 +420,11 @@ class Stream(tf.keras.layers.Layer):
                     # Note: override first feature dimension with padded value.
                     self.state_shape[2] = output_feature_size
 
-                self.states = self.add_weight(
+                initial_variable_value = tf.zeros(self.state_shape)
+                self.states = tf.Variable(
+                    initial_variable_value,
                     name="states",
-                    shape=self.state_shape,
                     trainable=False,
-                    initializer=tf.zeros_initializer,
                 )
 
         elif self.mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
