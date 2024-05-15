@@ -23,6 +23,8 @@ from microwakeword.layers import sub_spectral_normalization
 import ast
 import tensorflow as tf
 
+# tf.compat.v1.disable_eager_execution()
+
 
 def parse(text):
     """Parse model parameters.
@@ -53,12 +55,6 @@ def model_parameters(parser_nn):
         type=float,
         default=0.0,
         help="Percentage of data dropped",
-    )
-    parser_nn.add_argument(
-        "--dropout_final_layer",
-        type=float,
-        default=0.0,
-        help="Percentage of data dropped before final convolution layer",
     )
     parser_nn.add_argument(
         "--pointwise_filters",
@@ -107,16 +103,16 @@ def spectrogram_slices_dropped(flags):
         int: number of spectrogram slices dropped
     """
     spectrogram_slices_dropped = 0
-    
+
     # initial 3x1 convolution drops 2
     if flags.first_conv_filters > 0:
-        spectrogram_slices_dropped += 2  
+        spectrogram_slices_dropped += 2
 
     for repeat, ksize in zip(
         parse(flags.repeat_in_block),
         parse(flags.mixconv_kernel_sizes),
-    ):  
-        spectrogram_slices_dropped += repeat*(max(ksize)-1)
+    ):
+        spectrogram_slices_dropped += repeat * (max(ksize) - 1)
 
     return spectrogram_slices_dropped
 
@@ -165,8 +161,8 @@ class MixConv(object):
         """
         self._channel_axis = -1
 
-        self.ring_buffer_length = max(kernel_size)-1
-        
+        self.ring_buffer_length = max(kernel_size) - 1
+
         self.kernel_sizes = kernel_size
 
     def __call__(self, inputs):
@@ -174,46 +170,42 @@ class MixConv(object):
         #   - There is some latency overhead on the esp devices for loading each ring buffer's data
         #   - This avoids variable's holding redundant information
         #   - Reduces the necessary size of the tensor arena
-        if not training:
-            ring_buffer = tf.keras.layers.Input(shape=(inputs.shape[0],self.ring_buffer_length,inputs.shape[2],inputs.shape[3]))
-            net = tf.concat([ring_buffer, inputs], 1)
-            output_to_ring_buffer = net[:, 1, :, :]
-        else:
-            net = inputs
-            # net = stream.Stream(
-            #     cell=tf.identity,
-            #     ring_buffer_size_in_time_dim=self.ring_buffer_length,
-            #     use_one_step=False,
-            #     # pad_time_dim=None,  mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
-            # )(inputs)
+        net = stream.Stream(
+            cell=tf.identity,
+            ring_buffer_size_in_time_dim=self.ring_buffer_length,
+            use_one_step=False,
+            mode=self.mode,
+        )(inputs)
 
         if len(self.kernel_sizes) == 1:
             return tf.keras.layers.DepthwiseConv2D(
-                        (self.kernel_sizes[0], 1), strides=1, padding="valid")(net)
+                (self.kernel_sizes[0], 1), strides=1, padding="valid"
+            )(net)
 
         filters = _get_shape_value(net.shape[self._channel_axis])
         splits = _split_channels(filters, len(self.kernel_sizes))
         x_splits = tf.split(net, splits, self._channel_axis)
 
-
         x_outputs = []
         for x, ks in zip(x_splits, self.kernel_sizes):
             fit = strided_drop.StridedKeep(ks)(x)
-            x_outputs.append(tf.keras.layers.DepthwiseConv2D(
-                        (ks, 1), strides=1, padding="valid")(fit))
+            x_outputs.append(
+                tf.keras.layers.DepthwiseConv2D((ks, 1), strides=1, padding="valid")(
+                    fit
+                )
+            )
 
-        # x_outputs = [c(x) for x, c in zip(x_splits, self._convs)]
         for i, output in enumerate(x_outputs):
             features_drop = output.shape[1] - x_outputs[-1].shape[1]
             x_outputs[i] = strided_drop.StridedDrop(features_drop)(output)
-        
+
         x = tf.concat(x_outputs, self._channel_axis)
         return x
 
 
 def model(flags, shape, batch_size):
     """MixedNet model.
-    
+
     It is based on the paper
     MixConv: Mixed Depthwise Convolutional Kernels
     MatchboxNet model.
@@ -254,14 +246,17 @@ def model(flags, shape, batch_size):
     if flags.first_conv_filters > 0:
         net = stream.Stream(
             cell=tf.keras.layers.Conv2D(
-                flags.first_conv_filters, (3, 1), strides=(1, 1), padding="valid", use_bias=False
+                flags.first_conv_filters,
+                (3, 1),
+                strides=(1, 1),
+                padding="valid",
+                use_bias=False,
             ),
             use_one_step=True,
             pad_time_dim=None,
             pad_freq_dim="valid",
-            # mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
         )(net)
-    
+
         net = tf.keras.layers.Activation("relu")(net)
 
     # encoder
@@ -270,26 +265,27 @@ def model(flags, shape, batch_size):
         repeat_in_block,
         mixconv_kernel_sizes,
         residual_connections,
-    ):  
+    ):
         if res:
             residual = tf.keras.layers.Conv2D(
                 filters=filters, kernel_size=1, use_bias=False, padding="same"
             )(net)
             residual = tf.keras.layers.BatchNormalization()(residual)
             residual = tf.keras.layers.Activation("relu")(residual)
-        
+
         for _ in range(repeat):
-            net = MixConv(kernel_size = ksize)(net)
+            net = MixConv(kernel_size=ksize)(net)
             net = tf.keras.layers.Conv2D(
                 filters=filters, kernel_size=1, use_bias=False, padding="same"
             )(net)
             net = tf.keras.layers.BatchNormalization()(net)
             net = tf.keras.layers.Activation("relu")(net)
-            
+
             if res:
-                residual = strided_drop.StridedDrop(residual.shape[1]-net.shape[1])(residual)        
+                residual = strided_drop.StridedDrop(residual.shape[1] - net.shape[1])(
+                    residual
+                )
                 net = net + residual
-            
 
     # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regular pooling operations
     if net.shape[1] > 1:
@@ -305,26 +301,4 @@ def model(flags, shape, batch_size):
     net = tf.keras.layers.Flatten()(net)
     net = tf.keras.layers.Dense(1, activation="sigmoid")(net)
 
-    # net = tf.keras.layers.Dropout(rate=flags.dropout_final_layer)(net)
-    # net = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)(net)
-
-    # net = tf.squeeze(net, [1, 2])
-    # net = tf.keras.layers.Activation("sigmoid")(net)
-
-
-    ####
-    # Dense layers on all features
-    ####
-    
-    # net = stream.Stream(cell=tf.keras.layers.Flatten())(net)
-    # net = tf.keras.layers.Dense(1, activation="sigmoid")(net)
-    
-    # net = stream.Stream(cell=tf.keras.layers.DepthwiseConv2D((69,1), strides=1,padding="valid"))(net)    
-    # net = tf.keras.layers.Conv2D(filters=1,kernel_size=1)(net)
-    # net = stream.Stream(
-    #             cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
-    #         )(net)
-    # net = tf.squeeze(net, [1, 2])    
-    # net = tf.keras.layers.Activation("sigmoid")(net)
-    
     return tf.keras.Model(input_audio, net)
