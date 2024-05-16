@@ -93,9 +93,9 @@ def freqmix_augment(
 def spec_augment(
     spectrogram,
     time_mask_max_size=0,
-    time_mask_count=1,
+    time_mask_count=0,
     freq_mask_max_size=0,
-    freq_mask_count=1,
+    freq_mask_count=0,
 ):
     """Applies SpecAugment to the input spectrogram.
     Based on SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition by D. Park, W. Chan, Y. Zhang, C. Chiu, B. Zoph, E Cubuk, Q Le
