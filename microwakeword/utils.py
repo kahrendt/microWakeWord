@@ -51,23 +51,6 @@ def _set_mode(model, mode):
     return model
 
 
-def _get_input_output_states(model):
-    """Get input/output states of model with external states."""
-    input_states = []
-    output_states = []
-    for i in range(len(model.layers)):
-        config = model.layers[i].get_config()
-        # input output states exist only in layers with property 'mode'
-        if "mode" in config:
-            input_state = model.layers[i].get_input_state()
-            if input_state not in ([], [None]):
-                input_states.append(model.layers[i].get_input_state())
-            output_state = model.layers[i].get_output_state()
-            if output_state not in ([], [None]):
-                output_states.append(output_state)
-    return input_states, output_states
-
-
 def _copy_weights(new_model, model):
     """Copy weights of trained model to an inference one."""
 
@@ -145,21 +128,6 @@ def _copy_weights(new_model, model):
     return new_model
 
 
-def _flatten_nested_sequence(sequence):
-    """Returns a flattened list of sequence's elements."""
-    if not isinstance(sequence, Sequence):
-        return [sequence]
-    result = []
-    for value in sequence:
-        result.extend(_flatten_nested_sequence(value))
-    return result
-
-
-def _get_state_shapes(model_states):
-    """Converts a nested list of states in to a flat list of their shapes."""
-    return [state.shape for state in _flatten_nested_sequence(model_states)]
-
-
 def save_model_summary(model, path, file_name="model_summary.txt"):
     """Saves model topology/summary in text format.
 
@@ -175,41 +143,6 @@ def save_model_summary(model, path, file_name="model_summary.txt"):
         )  # pylint: disable=unnecessary-lambda
         model_summary = "\n".join(stringlist)
         fd.write(model_summary)
-
-
-def _clone_model(model, input_tensors):
-    """Clone model with configs, except of weights."""
-    new_input_layers = {}  # Cache for created layers.
-    # pylint: disable=protected-access
-    print("starting to clone")
-    if input_tensors is not None:
-        # Make sure that all input tensors come from a Keras layer.
-        input_tensors = tf.nest.flatten(input_tensors)
-        for i, input_tensor in enumerate(input_tensors):
-            if not tf.keras.backend.is_keras_tensor(input_tensor):
-                raise ValueError("Expected keras tensor but get", input_tensor)
-            original_input_layer = model._input_layers[i]
-            newly_created_input_layer = input_tensor._keras_history.layer
-            new_input_layers[original_input_layer] = newly_created_input_layer
-    print("before")
-    model_config, created_layers = (
-        _clone_layers_and_model_config(  # pylint:disable=protected-access,line-too-long
-            model, new_input_layers, _clone_layer
-        )
-    )
-    # pylint: enable=protected-access
-    print(created_layers)
-
-    # Reconstruct model from the config, using the cloned layers.
-    input_tensors, output_tensors, created_layers = (
-        reconstruct_from_config(  # pylint:disable=protected-access
-            model_config, created_layers=created_layers
-        )
-    )
-    print("reconstructed")
-
-    new_model = tf.keras.Model(input_tensors, output_tensors, name=model.name)
-    return new_model
 
 
 def convert_to_inference_model(model, input_tensors, mode):
@@ -233,13 +166,8 @@ def convert_to_inference_model(model, input_tensors, mode):
         ValueError: in case of invalid `model` argument value or input_tensors
     """
 
-    # tf.compat.v1.disable_eager_execution()
-
     # scope is introduced for simplifiyng access to weights by names
     scope_name = "streaming"
-    # input_tensors.append(tf.keras.layers.Input(
-    #     shape=(5,1,40), batch_size=1, dtype=tf.float32, name="streaming_input_1"
-    # ))
     
     with tf.name_scope(scope_name):
         if not isinstance(model, tf.keras.Model):
@@ -262,28 +190,11 @@ def convert_to_inference_model(model, input_tensors, mode):
             )
         # pylint: enable=protected-access
         model = _set_mode(model, mode)
-        print("preclone")
         new_model = tf.keras.models.clone_model(model, input_tensors)
-        # new_model = _clone_model(model, input_tensors)
-    print("cloned")
+
 
     if mode == modes.Modes.STREAM_INTERNAL_STATE_INFERENCE:
         return _copy_weights(new_model, model)
-    elif mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
-        # input_states, output_states = _get_input_output_states(model)
-        input_states, output_states = _get_input_output_states(new_model)
-        # all_inputs = model.inputs + input_states
-        # all_outputs = model.outputs + output_states
-        all_inputs = new_model.inputs + input_states
-        all_outputs = new_model.outputs + output_states
-        new_streaming_model = tf.keras.Model(all_inputs, all_outputs)
-        new_streaming_model.input_shapes = _get_state_shapes(all_inputs)
-        new_streaming_model.output_shapes = _get_state_shapes(all_outputs)
-
-        print(new_streaming_model.summary())
-
-        new_streaming_model.set_weights(model.get_weights())
-        return new_streaming_model
     elif mode == modes.Modes.NON_STREAM_INFERENCE:
         new_model.set_weights(model.get_weights())
         return new_model
@@ -297,8 +208,8 @@ def to_streaming_inference(model_non_stream, config, mode):
     Args:
       model_non_stream: trained Keras model non streamable
       config: dictionary containing microWakeWord training configuration
-      mode: it supports Non streaming inference, Streaming inference with internal
-        states, Streaming inference with external states
+      mode: it supports Non streaming inference or Streaming inference with internal
+        states
 
     Returns:
       Keras inference model of inference_type
@@ -340,36 +251,6 @@ def to_streaming_inference(model_non_stream, config, mode):
     return model_inference
 
 
-def model_to_tflite(
-    model_non_stream,
-    config,
-    save_model_path,
-    mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
-):
-    model_stream = to_streaming_inference(model_non_stream, config, mode)
-    # if save_model_path:
-    #     save_model_summary(model_stream, save_model_path)
-    tf.compat.v1.reset_default_graph()
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.allow_growth = True
-    
-    sess = tf.compat.v1.Session(config=config)
-    converter = tf.compat.v1.lite.TFLiteConverter.from_session(sess, model_stream.input, model_stream.output)  
-    
-    # print(model_stream.inputs)
-    # full_model = tf.function(lambda x,y: model_stream(x,y))
-    # full_model = full_model.get_concrete_function(tf.TensorSpec(model_stream.inputs[0].shape, model_stream.inputs[0].dtype),tf.TensorSpec(model_stream.inputs[1].shape, model_stream.inputs[1].dtype))
-    
-    
-    # converter = tf.compat.v1.lite.TFLiteConverter(model_stream, model_stream.input, model_stream.output)    
-    
-    # converter = tf.compat.v2.lite.TFLiteConverter.from_keras_model(model_stream)
-    
-    tflite_model = converter.convert()
-    path_to_output = os.path.join(save_model_path, 'external.tflite')
-    open(path_to_output, "wb").write(tflite_model)        
-
-
 def model_to_saved(
     model_non_stream,
     config,
@@ -386,13 +267,12 @@ def model_to_saved(
       model_non_stream: Keras non streamable model
       config: dictionary containing microWakeWord training configuration
       save_model_path: path where saved model representation with be stored
-      mode: inference mode it can be streaming with external state or non
+      mode: inference mode it can be streaming with internal state or non
         streaming
     """
 
     if mode not in (
         modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
-        modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
         modes.Modes.NON_STREAM_INFERENCE,
     ):
         raise ValueError("mode %s is not supported " % mode)

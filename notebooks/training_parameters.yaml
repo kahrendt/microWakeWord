@@ -90,8 +90,6 @@ time_mask_count:
 - 0
 time_mask_max_size:
 - 10
-train_dir: trained_models/alexa_mixednet_5_min_jitter
+train_dir: trained_models/changes_revert_test
 training_steps:
-- 20000
-- 20000
-- 20000
+- 500

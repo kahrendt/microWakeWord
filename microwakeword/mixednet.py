@@ -1,6 +1,5 @@
 # coding=utf-8
-# Copyright 2023 The Google Research Authors.
-# Modifications copyright 2024 Kevin Ahrendt.
+# Copyright 2024 Kevin Ahrendt.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,17 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Model based on 1D depthwise and 1x1 convolutions in time + residual."""
-from microwakeword.layers import modes
+"""Model based on 1D depthwise MixedConvs and 1x1 convolutions in time + residual."""
+
 from microwakeword.layers import stream
 from microwakeword.layers import strided_drop
-from microwakeword.layers import sub_spectral_normalization
 
 import ast
 import tensorflow as tf
-
-# tf.compat.v1.disable_eager_execution()
-
 
 def parse(text):
     """Parse model parameters.
@@ -47,9 +42,6 @@ def parse(text):
 def model_parameters(parser_nn):
     """MatchboxNet model parameters."""
 
-    parser_nn.add_argument(
-        "--activation", type=str, default="relu", help="activation function"
-    )
     parser_nn.add_argument(
         "--dropout",
         type=float,
@@ -89,7 +81,7 @@ def model_parameters(parser_nn):
         "--first_conv_filters",
         type=int,
         default=0,
-        help="Number of filters on initial convolution layer",
+        help="Number of filters on initial convolution layer. Set to 0 to disable",
     )
 
 
@@ -118,12 +110,16 @@ def spectrogram_slices_dropped(flags):
 
 
 def _split_channels(total_filters, num_groups):
+    """ Helper for MixConv
+    """
     split = [total_filters // num_groups for _ in range(num_groups)]
     split[0] += total_filters - sum(split)
     return split
 
 
 def _get_shape_value(maybe_v2_shape):
+    """ Helper for MixConv
+    """
     if maybe_v2_shape is None:
         return None
     elif isinstance(maybe_v2_shape, int):
@@ -174,7 +170,6 @@ class MixConv(object):
             cell=tf.identity,
             ring_buffer_size_in_time_dim=self.ring_buffer_length,
             use_one_step=False,
-            mode=self.mode,
         )(inputs)
 
         if len(self.kernel_sizes) == 1:
