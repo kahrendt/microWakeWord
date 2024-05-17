@@ -210,6 +210,10 @@ def tflite_model_accuracy(
         features_length=config["spectrogram_length"],
         truncation_strategy=truncation_strategy,
     )
+    
+    if len(test_fingerprints) == 0:
+        logging.info("No spectrograms in the {data_set} set".format(data_set=data_set))
+        return
 
     logging.info("Testing TFLite model on the {data_set} set".format(data_set=data_set))
 
@@ -254,7 +258,7 @@ def tflite_model_accuracy(
             true_positives, true_negatives, false_positives, false_negatives
         )
 
-        if i % 1000 == 0 and i:
+        if i % 1000 == 0 and i and truncation_strategy != "none":
             logging.info(
                 "TFLite model on the {dataset} set: accuracy = {accuracy:.6}; recall = {recall:.6}; precision = {precision:.6}; fpr = {fpr:.6}; fnr = {fnr:.6} ({iteration} out of {length})".format(
                     dataset=data_set,
