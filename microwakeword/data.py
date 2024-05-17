@@ -93,13 +93,11 @@ def fixed_length_spectrogram(
             features_offset = np.random.randint(0, data_length - features_length)
         elif truncation_strategy == "none":
             # return the entire spectrogram
-            features_offset = 0
             features_length = data_length
         elif truncation_strategy == "truncate_start":
             features_offset = data_length - features_length
         elif truncation_strategy == "truncate_end":
             features_offset = 0
-
     else:
         pad_slices = features_length - data_length
 
@@ -208,13 +206,18 @@ class MmapFeatureGenerator(object):
             
         for feature in self.feature_sets[mode]:
             spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
-            spectrogram = fixed_length_spectrogram(
-                spectrogram,
-                features_length,
-                truncation_strategy,
-            )
             
-            yield spectrogram
+            if truncation_strategy == "split":
+                for feature_start_index in range(0, spectrogram.shape[0]-features_length, 10):
+                    yield spectrogram[feature_start_index : feature_start_index + features_length]
+            else:
+                spectrogram = fixed_length_spectrogram(
+                    spectrogram,
+                    features_length,
+                    truncation_strategy,
+                )
+                
+                yield spectrogram
     
     def get_split_feature_generator(
         self,
@@ -390,7 +393,7 @@ class FeatureHandler(object):
             sample_count = self.get_mode_size(mode)
 
         # spectrogram_shape = (features_length, 80)
-        spectrogram_shape = (features_length, 40)
+        # spectrogram_shape = (features_length, 40)
 
         data = []
         labels = []
@@ -423,8 +426,7 @@ class FeatureHandler(object):
                 data.append(spectrogram)
                 labels.append(float(provider.label))
                 weights.append(float(provider.penalty_weight))
-                
-        elif (mode == "validation") or (mode == "testing"):
+        else:
             for provider in self.feature_providers:
                 generator = provider.get_feature_generator(mode, features_length, truncation_strategy)
                 
@@ -432,14 +434,9 @@ class FeatureHandler(object):
                     data.append(spectrogram)
                     labels.append(provider.label)
                     weights.append(provider.penalty_weight)
-        else:
-            # ambient testing, split the long spectrograms into overlapping chunks
-            for provider in self.feature_providers:
-                generator = provider.get_split_feature_generator(mode, features_length)
-                
-                for spectrogram in generator:
-                    data.append(spectrogram)
-                    labels.append(provider.label)
-                    weights.append(provider.penalty_weight)
 
+        if truncation_strategy == "none":
+            # Spectrograms may be of different length
+            return data, np.array(labels), np.array(weights)
+        
         return np.array(data), np.array(labels), np.array(weights)
