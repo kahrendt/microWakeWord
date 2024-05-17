@@ -119,18 +119,18 @@ def validate_nonstreaming(config, data_processor, model, test_set):
                 total_predicted_at_cutoff += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > target_faph_cutoff_probability)
             
             recall_at_no_faph = total_predicted_at_cutoff[0]/total_positive_sample_count
-            # print(total_positive_sample_count, total_predicted_at_cutoff[0])
-            # print("Recall at 1 faph:", total_predicted_at_cutoff[0]/total_positive_sample_count, "cutoff level is", target_faph_cutoff_probability)
 
-        
-
-    metrics["recall_at_no_faph"] = recall_at_no_faph
-    metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
-    metrics["ambient_false_positives"] = ambient_false_positives
-    metrics["ambient_false_positives_per_hour"] = (
-        estimated_ambient_false_positives_per_hour
-    )
-
+        metrics["recall_at_no_faph"] = recall_at_no_faph
+        metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
+        metrics["ambient_false_positives"] = ambient_false_positives
+        metrics["ambient_false_positives_per_hour"] = (
+            estimated_ambient_false_positives_per_hour
+        )
+    else:
+        metrics["recall_at_no_faph"] = 0
+        metrics["cutoff_for_no_faph"] = 0
+        metrics["ambient_false_positives"] = 0
+        metrics["ambient_false_positives_per_hour"] = 0
     return metrics
 
 
