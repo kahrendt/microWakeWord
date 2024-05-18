@@ -117,7 +117,7 @@ class MmapFeatureGenerator(object):
         penalty_weight,
         truncation_strategy,
     ):
-        self.label = label
+        self.label = float(label)
         self.sampling_weight = sampling_weight
         self.penalty_weight = penalty_weight
         self.truncation_strategy = truncation_strategy
@@ -184,6 +184,9 @@ class MmapFeatureGenerator(object):
         return self.stats[mode]["spectrogram_count"]                
 
     def get_random_spectrogram(self, mode, features_length, truncation_strategy):
+        if truncation_strategy == "default":
+            truncation_strategy = self.truncation_strategy
+            
         feature = random.choice(self.feature_sets[mode])
         spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
         
@@ -206,7 +209,6 @@ class MmapFeatureGenerator(object):
             
         for feature in self.feature_sets[mode]:
             spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
-            
             if truncation_strategy == "split":
                 for feature_start_index in range(0, spectrogram.shape[0]-features_length, 10):
                     yield spectrogram[feature_start_index : feature_start_index + features_length]
@@ -254,6 +256,9 @@ class ClipsHandlerWrapperGenerator(object):
             return 0
 
     def get_random_spectrogram(self, mode, features_length, truncation_strategy):
+        if truncation_strategy == "default":
+            truncation_strategy = self.truncation_strategy
+        
         spectrogram = self.clips_handler.generate_random_augmented_spectrogram()
         
         spectrogram = fixed_length_spectrogram(
@@ -297,9 +302,7 @@ class FeatureHandler(object):
         
         logging.info("Loading and analyzing data sets.")
 
-        feature_sets = copy.deepcopy(config["features"])
-        
-        for feature_set in feature_sets:
+        for feature_set in config["features"]:
             if feature_set["type"] == "mmap":
                 self.feature_providers.append(MmapFeatureGenerator(feature_set['features_dir'], feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"]))
             elif feature_set["type"] == "clips":
@@ -395,6 +398,7 @@ class FeatureHandler(object):
         # spectrogram_shape = (features_length, 80)
         # spectrogram_shape = (features_length, 40)
 
+        # data = np.zeros((0,) + spectrogram_shape)
         data = []
         labels = []
         weights = []
