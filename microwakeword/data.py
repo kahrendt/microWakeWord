@@ -25,6 +25,7 @@ from absl import logging
 from pathlib import Path
 from mmap_ninja.ragged import RaggedMmap
 from microwakeword.feature_generation import ClipsHandler
+from microwakeword.room_simulation_feature_generation import RoomClipsHandler
 
 def spec_augment(
     spectrogram,
@@ -195,7 +196,9 @@ class MmapFeatureGenerator(object):
             features_length,
             truncation_strategy,
         )
-        
+        # if spectrogram.shape[-1] == 40:
+        #     blank_playback = np.zeros(spectrogram.shape)
+        #     spectrogram = np.concatenate([spectrogram, blank_playback], axis=-1)
         return spectrogram
 
     def get_feature_generator(
@@ -211,7 +214,13 @@ class MmapFeatureGenerator(object):
             spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
             if truncation_strategy == "split":
                 for feature_start_index in range(0, spectrogram.shape[0]-features_length, 10):
-                    yield spectrogram[feature_start_index : feature_start_index + features_length]
+                    split_spectrogram = spectrogram[feature_start_index : feature_start_index + features_length]
+                    
+                    # if split_spectrogram.shape[-1] == 40:
+                    #     blank_playback = np.zeros(split_spectrogram.shape)
+                    #     split_spectrogram = np.concatenate([split_spectrogram, blank_playback], axis=-1)
+                        
+                    yield split_spectrogram
             else:
                 spectrogram = fixed_length_spectrogram(
                     spectrogram,
@@ -219,18 +228,21 @@ class MmapFeatureGenerator(object):
                     truncation_strategy,
                 )
                 
+                # if spectrogram.shape[-1] == 40:
+                #     blank_playback = np.zeros(spectrogram.shape)
+                #     spectrogram = np.concatenate([spectrogram, blank_playback], axis=-1)
                 yield spectrogram
     
-    def get_split_feature_generator(
-        self,
-        mode,
-        features_length,
-        split_stride=10,
-    ):
-        for feature in self.feature_sets[mode]:
-            spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
-            for feature_start_index in range(0, spectrogram.shape[0]-features_length, split_stride):
-                yield spectrogram[feature_start_index : feature_start_index + features_length]
+    # def get_split_feature_generator(
+    #     self,
+    #     mode,
+    #     features_length,
+    #     split_stride=10,
+    # ):
+    #     for feature in self.feature_sets[mode]:
+    #         spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
+    #         for feature_start_index in range(0, spectrogram.shape[0]-features_length, split_stride):
+    #             yield spectrogram[feature_start_index : feature_start_index + features_length]
 
 class ClipsHandlerWrapperGenerator(object):
     def __init__(self, 
@@ -239,12 +251,14 @@ class ClipsHandlerWrapperGenerator(object):
         sampling_weight,
         penalty_weight,
         truncation_strategy,
+        generate=False,
     ):
         self.clips_handler = clips_handler
         self.label = label
         self.sampling_weight = sampling_weight
         self.penalty_weight = penalty_weight
         self.truncation_strategy = truncation_strategy
+        self.generate = generate
     
     def get_mode_duration(self, mode):
         return 0.0
@@ -259,13 +273,21 @@ class ClipsHandlerWrapperGenerator(object):
         if truncation_strategy == "default":
             truncation_strategy = self.truncation_strategy
         
-        spectrogram = self.clips_handler.generate_random_augmented_spectrogram()
+        if self.generate:
+            spectrogram = next(self.clips_handler.generate_clip_and_augmented_spectrogram())
+        else:
+            spectrogram = self.clips_handler.generate_random_augmented_spectrogram()
+
         
         spectrogram = fixed_length_spectrogram(
             spectrogram,
             features_length,
             truncation_strategy,
         )
+        
+        # if spectrogram.shape[-1] == 40:
+        #     blank_playback = np.zeros(spectrogram.shape)
+        #     spectrogram = np.concatenate([spectrogram, blank_playback], axis=-1)
         
         return spectrogram
 
@@ -286,7 +308,7 @@ class ClipsHandlerWrapperGenerator(object):
     ):
         for x in []:
             yield x
-
+            
 class FeatureHandler(object):
     """Class that handles loading spectrogram features and providing them to the training and testing functions.
 
@@ -306,24 +328,43 @@ class FeatureHandler(object):
             if feature_set["type"] == "mmap":
                 self.feature_providers.append(MmapFeatureGenerator(feature_set['features_dir'], feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"]))
             elif feature_set["type"] == "clips":
-                clips_handler = ClipsHandler(
+                clips_handler = ClipsHandler(**feature_set)
+                # clips_handler = ClipsHandler(
+                #                 input_path=feature_set['features_dir'],
+                #                 input_glob=feature_set["input_glob"],
+                #                 impulse_paths=feature_set["impulse_paths"],
+                #                 background_paths=feature_set["background_paths"], 
+                #                 augmentation_probabilities = feature_set["augmentation_probabilities"],
+                #                 augmented_duration_s =feature_set["augmented_duration_s"],
+                #                 max_start_time_from_right_s = None,
+                #                 max_jitter_s = feature_set["max_jitter_s"],
+                #                 min_jitter_s = feature_set["min_jitter_s"],
+                #                 max_clip_duration_s = feature_set["max_clip_duration_s"], 
+                #                 min_clip_duration_s = feature_set["min_clip_duration_s"],
+                #                 remove_silence=False,
+                #                 truncate_clip_s=None,
+                #                 repeat_clip_min_duration_s=None,
+                #                 split_spectrogram_duration_s=None,
+                #             )
+                self.feature_providers.append(ClipsHandlerWrapperGenerator(clips_handler, feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"], feature_set['generate']))
+            elif feature_set["type"] == "room_clips":
+                clips_handler = RoomClipsHandler(
                                 input_path=feature_set['features_dir'],
                                 input_glob=feature_set["input_glob"],
-                                impulse_paths=feature_set["impulse_paths"],
-                                background_paths=feature_set["background_paths"], 
-                                augmentation_probabilities = feature_set["augmentation_probabilities"],
+                                impulse_path=feature_set["impulse_path"],
+                                impulse_glob=feature_set["impulse_glob"],
+                                playback_background_path=feature_set["playback_background_path"], 
+                                playback_background_glob=feature_set["playback_background_glob"], 
+                                background_path=feature_set["background_path"], 
+                                background_glob=feature_set["background_glob"], 
                                 augmented_duration_s =feature_set["augmented_duration_s"],
                                 max_start_time_from_right_s = None,
                                 max_jitter_s = feature_set["max_jitter_s"],
                                 min_jitter_s = feature_set["min_jitter_s"],
                                 max_clip_duration_s = feature_set["max_clip_duration_s"], 
                                 min_clip_duration_s = feature_set["min_clip_duration_s"],
-                                remove_silence=False,
-                                truncate_clip_s=None,
-                                repeat_clip_min_duration_s=None,
-                                split_spectrogram_duration_s=None,
                             )
-                self.feature_providers.append(ClipsHandlerWrapperGenerator(clips_handler, feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"]))
+                self.feature_providers.append(ClipsHandlerWrapperGenerator(clips_handler, feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"], feature_set['generate']))
 
     def get_mode_duration(self, mode):
         """Returns the durations of all spectrogram features in the given mode.
@@ -438,9 +479,21 @@ class FeatureHandler(object):
                     data.append(spectrogram)
                     labels.append(provider.label)
                     weights.append(provider.penalty_weight)
-
+            
+        if truncation_strategy != "none":
+            # Spectrograms are all the same length, convert to numpy array
+            data = np.array(data)
+        labels = np.array(labels)
+        weights = np.array(weights)
+            
         if truncation_strategy == "none":
             # Spectrograms may be of different length
             return data, np.array(labels), np.array(weights)
+    
+        indices = np.arange(labels.shape[0])
         
-        return np.array(data), np.array(labels), np.array(weights)
+        if mode == "testing" or "validation":
+            # Randomize the order of the data, weights, and labels            
+            np.random.shuffle(indices)
+                
+        return data[indices], labels[indices], weights[indices]

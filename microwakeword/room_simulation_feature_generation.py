@@ -23,14 +23,20 @@ import os
 import random
 import wave
 
-from scipy.signal import convolve
+from scipy.signal import convolve, convolve2d, fftconvolve
+from scipy.io import wavfile
+
+from microwakeword.cGenerateFeatures import generate_float_features
 
 import numpy as np
 import tensorflow as tf
 
 import torchaudio
 
+import sys
+sys.path.append('/Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/piper-sample-generator')
 
+from generate_samples_generator import generate_samples
 
 from mmap_ninja.ragged import RaggedMmap
 from pathlib import Path
@@ -52,8 +58,8 @@ class RoomClipsHandler:
         self,
         input_path,
         input_glob,
-        impulses_path=None,
-        impulses_glob=None,
+        impulse_path=None,
+        impulse_glob=None,
         playback_background_path=None,
         playback_background_glob=None,
         background_path=None,
@@ -73,7 +79,7 @@ class RoomClipsHandler:
 
         # If either the the background_paths or impulse_paths are not specified, use an identity transform instead
 
-        self.impulses = [str(i) for i in Path(impulses_path).glob(impulses_glob)]
+        self.impulses = [str(i) for i in Path(impulse_path).glob(impulse_glob)]
         self.playback_background_clips = [str(i) for i in Path(playback_background_path).glob(playback_background_glob)]
         self.background_clips = [str(i) for i in Path(background_path).glob(background_glob)]
 
@@ -201,7 +207,7 @@ class RoomClipsHandler:
         
         
         self.clips = audio_dataset
-        
+        self.generator = generate_samples('hey Jarvis', '.', max_samples=1000000)
                 
     def augment_clip(self, input_audio):
         """Augments the input audio, optionally creating a fixed sized clip first.
@@ -226,81 +232,109 @@ class RoomClipsHandler:
         if augmentation_probabilities[0] < self.background_probability:
             clip_path = random.choice(self.background_clips)
             
+            print("adding background clip)")
+            
             clip,_ = torchaudio.load(clip_path)
             
             clip = np.squeeze(clip).numpy()
             
+            if clip.shape[0] < self.desired_samples:
+                clip = self.repeat_clip(clip)
+            
             if clip.shape[0] > self.desired_samples:
                 fixed_length_clip = self.truncate_clip(clip,16000,self.augmented_duration_s)
-            elif clip.shape[0] < self.desired_samples:
-                fixed_length_clip = self.repeat_clip(clip)
-                fixed_length_clip = fixed_length_clip[:self.desired_samples]
+            # elif clip.shape[0] < self.desired_samples:
+            #     fixed_length_clip = self.repeat_clip(clip)
+            #     fixed_length_clip = fixed_length_clip[:self.desired_samples]
             else:
                 fixed_length_clip = clip
                 
             sounds.append(fixed_length_clip)
             gains.append(np.random.randint(-5,15))
             
-        if augmentation_probabilities[1] < self.playback_background_probability:
-            clip_path = random.choice(self.playback_background_clips)
+        # if augmentation_probabilities[1] < self.playback_background_probability:
+        #     clip_path = random.choice(self.playback_background_clips)
             
-            clip,_ = torchaudio.load(clip_path)
+        #     clip,_ = torchaudio.load(clip_path)
             
-            clip = np.squeeze(clip).numpy()
+        #     clip = np.squeeze(clip).numpy()
             
-            if clip.shape[0] > self.desired_samples:
-                fixed_length_clip = self.truncate_clip(clip,16000,self.augmented_duration_s)
-            elif clip.shape[0] < self.desired_samples:
-                fixed_length_clip = self.repeat_clip(clip)
-                fixed_length_clip = fixed_length_clip[:self.desired_samples]
-            else:
-                fixed_length_clip = clip
+        #     if clip.shape[0] < self.desired_samples:
+        #         fixed_length_clip = self.repeat_clip(clip)
+                            
+        #     if clip.shape[0] > self.desired_samples:
+        #         fixed_length_clip = self.truncate_clip(clip,16000,self.augmented_duration_s)
+        #     # elif clip.shape[0] < self.desired_samples:
+        #     #     fixed_length_clip = self.repeat_clip(clip)
+        #     #     fixed_length_clip = fixed_length_clip[:self.desired_samples]
+        #     else:
+        #         fixed_length_clip = clip
         
-            sounds.append(fixed_length_clip)
-            gains.append(np.random.randint(-5,15))
+        #     sounds.append(fixed_length_clip)
+        #     gains.append(np.random.randint(-5,15))
             
         
         room_impulse_path = random.choice(self.impulses)
         rir,_ = torchaudio.load(room_impulse_path)
-        reverbed, original_samples = self.apply_impulse(sounds, rir, self.augmented_duration_s, gain=gains)
+        reverbed, original_samples = self.apply_impulse(sounds, rir.numpy(), self.augmented_duration_s, gain=gains)
 
-        mic_0 = (reverbed[:,0]*32767).astype(np.int16)
+        # print(np.mean(reverbed[:,0]))
+        # print(np.mean(reverbed[:,1]))
+
+        reverbed = (reverbed*32767).astype(np.int16)
+        # mic_0 = (reverbed[:,0]*32767).astype(np.int16)
+        
+
+        
         if augmentation_probabilities[1] < self.playback_background_probability:
             playback_background = (original_samples[:,-1]*32767).astype(np.int16)
         else:
             playback_background = None
 
-        return mic_0, playback_background
+        return reverbed, playback_background
+        # return mic_0, playback_background
 
-    def apply_impulse(self, sounds, rir, desired_duration,gain=[10,5]):
+    def apply_impulse(self, sounds, rir, desired_duration,gain=[10,5], channels="lr"):
         desired_samples = int(desired_duration*16000)
-        ys = np.zeros((desired_samples,2), dtype=np.float32)
+        # if channels == "lr":
+        #     total_channels = 2
+        # else:
+        #     total_channels = 1
+        
+        total_channels = 2
+        
+        ys = np.zeros((desired_samples,total_channels), dtype=np.float32)
         
         input_samples = np.zeros((desired_samples, len(sounds)), dtype=np.float32)
+
+        stacked_input_samples = np.tile(sounds, (total_channels,1))
+
+        # if channels == "l" or channels == "r":
+        #     stacked_input_samples = np.tile(sounds, (1,1))
+        # elif channels == "lr":
+        #     stacked_input_samples = np.tile(sounds, (2,1))
+            
+        # stacked_input_samples = np.row_stack((sounds[0], sounds[0], sounds[1], sounds[1]))
+        # if channels == "l":
+        #     room_impulse = rir[0:stacked_input_samples.shape[0]:2,:]
+        # elif channels == "r":
+        #     room_impulse = rir[1:stacked_input_samples.shape[0]:2,:]
+        # elif channels == "lr":
+        #     room_impulse = rir[0:stacked_input_samples.shape[0],:]
+        room_impulse = rir[0:stacked_input_samples.shape[0],:]
+        print(stacked_input_samples.shape)
+        print(room_impulse.shape)
+        reverbed = convolve(stacked_input_samples, room_impulse)
+        print(reverbed.shape)
+        trimmed_reverbed = reverbed[:,:desired_samples]
+        print(trimmed_reverbed.shape)
         
-        for source_index in range(0,len(sounds)):
-            h0 = rir[source_index*2,:].numpy()
-            h1 = rir[source_index*2+1,:].numpy()
-            
-            audio_samples = np.squeeze(sounds[source_index])
-            
-            if audio_samples.shape[0] > desired_samples:
-                trimmed_start = np.random.randint(0,audio_samples.shape[0]-desired_samples)
-                fixed_length_samples = audio_samples[trimmed_start:trimmed_start+desired_samples]
-            elif audio_samples.shape[0] < desired_samples:
-                fixed_length_samples = np.zeros(desired_samples)
-                fixed_length_samples[-audio_samples.shape[0]:] = audio_samples
-            else:
-                fixed_length_samples = audio_samples
+        # TODO: this only works for two chanenls
+        for i in range(0, 2):#trimmed_reverbed.shape[0]//2):
+            mic_0 = trimmed_reverbed[2*i, :]
+            mic_1 = trimmed_reverbed[2*i+1,:]
 
-            input_samples[:, source_index] = fixed_length_samples
 
-            mic_0 = convolve(fixed_length_samples, h0)
-            mic_1 = convolve(fixed_length_samples, h1)
-                
-            # Trim the end samples as a result of the convolution
-            mic_0 = mic_0[:desired_samples]
-            mic_1 = mic_1[:desired_samples]
 
             E1 = np.sum(mic_0 ** 2)
             E2 = np.sum(mic_1 ** 2)
@@ -309,7 +343,8 @@ class RoomClipsHandler:
             mic_0 /= (E ** 0.5 + 1E-10)
             mic_1 /= (E ** 0.5 + 1E-10)
             
-            g = 10 ** (gain[source_index]/10.0)
+            g = 1
+            # g = 10 ** (gain[source_index]/10.0)
             ys[:,0] += g*mic_0
             ys[:,1] += g*mic_1
             
@@ -321,21 +356,29 @@ class RoomClipsHandler:
         Returns:
             (ndarray): a random clip's augmented audio with sample rate 16 kHz and 16-bit samples
         """
-        rand_audio = random.choice(self.clips)
-        return self.augment_clip(rand_audio["audio"]["array"])
+        # rand_audio = random.choice(self.clips)
+        # return self.augment_clip(rand_audio["audio"]["array"])        
+        return self.augment_clip((np.squeeze(next(self.generator))/32768).astype(np.float32))
 
-    def save_random_augmented_clip(self, output_file):
+
+    def save_random_augmented_clip(self, output_file, channel = "l"):
         """Saves a random augmented clip.
 
         Args:
             output_file (str): file name to save augmented clip to with sample rate 16 kHz and 16-bit samples
         """
         augmented_audio, background = self.augment_random_clip()
-        with wave.open(output_file, "wb") as output_wav_file:
-            output_wav_file.setframerate(16000)
-            output_wav_file.setsampwidth(2)
-            output_wav_file.setnchannels(1)
-            output_wav_file.writeframes(augmented_audio)
+        if channel == "l":
+            augmented_audio = augmented_audio[:,0]
+        elif channel == "r":
+            augmented_audio = augmented_audio[:,1]
+
+        wavfile.write(output_file, 16000, augmented_audio)
+        # with wave.open(output_file, "wb") as output_wav_file:
+        #     output_wav_file.setframerate(16000)
+        #     output_wav_file.setsampwidth(2)
+        #     output_wav_file.setnchannels(1)
+        #     output_wav_file.writeframes(mic_0)
 
     def generate_augmented_spectrogram(self, input_audio):
         """Generates the spectrogram of the input audio after augmenting.
@@ -348,15 +391,22 @@ class RoomClipsHandler:
         """
         augmented_audio, background = self.augment_clip(input_audio)
         
-        main_clip_features = generate_features_for_clip(augmented_audio)
+        mic_0_features = generate_features_for_clip(augmented_audio[:,0])
+        mic_1_features = generate_features_for_clip(augmented_audio[:,1])
+        # mic_0_features = generate_float_features(augmented_audio[:,0])
+        # mic_1_features = generate_float_features(augmented_audio[:,1])
+        
         if background is not None:
             background_clip_features = generate_features_for_clip(background)
         else:
-            background_clip_features = np.zeros(main_clip_features.shape, dtype=np.float32)
+            background_clip_features = np.zeros(mic_0_features.shape, dtype=np.float32)
             
-        concat_features = np.concatenate(main_clip_features, background_clip_features, axis=-1)
+        stacked_features = np.stack([mic_0_features, mic_1_features, background_clip_features])
+        # stacked_features = np.stack([mic_0_features])
+        return stacked_features
+        # concat_features = np.concatenate(main_clip_features, background_clip_features, axis=-1)
         
-        return concat_features
+        # return concat_features
 
     def generate_random_augmented_spectrogram(self):
         """Generates the spectrogram of a random audio clip after augmenting.
@@ -365,16 +415,31 @@ class RoomClipsHandler:
             (ndarray): the spectrogram of the augmented audio from a random clip
         """
         augmented_audio, background = self.augment_random_clip()
+  
+        mic_0_features = generate_features_for_clip(augmented_audio[:,0])
+        mic_1_features = generate_features_for_clip(augmented_audio[:,1])        
+        # mic_0_features = generate_float_features(augmented_audio[:,0])
+        # mic_1_features = generate_float_features(np.squeeze(augmented_audio[:,0]))
+        # mic_1_features = generate_features_for_clip(augmented_audio[:,1])           
         
-        main_clip_features = generate_features_for_clip(augmented_audio)
+        # main_clip_features = generate_features_for_clip(augmented_audio)
         if background is not None:
             background_clip_features = generate_features_for_clip(background)
         else:
-            background_clip_features = np.zeros(main_clip_features.shape, dtype=np.float32)
-        print(main_clip_features.shape)
-        concat_features = np.concatenate([main_clip_features, background_clip_features], axis=-1)
+            background_clip_features = np.zeros(mic_0_features.shape, dtype=np.float32)
+            
+        stacked_features = np.stack([mic_0_features, mic_1_features, background_clip_features])
+        return stacked_features
         
-        return concat_features
+        # main_clip_features = generate_features_for_clip(augmented_audio)
+        # if background is not None:
+        #     background_clip_features = generate_features_for_clip(background)
+        # else:
+        #     background_clip_features = np.zeros(main_clip_features.shape, dtype=np.float32)
+        # # print(main_clip_features.shape)
+        # # concat_features = np.concatenate([main_clip_features, background_clip_features], axis=-1)
+        
+        # return concat_features
 
     def augmented_features_generator(self, split=None, repeat=1):
         """Generator function for augmenting all loaded clips and computing their spectrograms
@@ -395,19 +460,20 @@ class RoomClipsHandler:
                 audio = clip["audio"]["array"]
 
                 spectrogram = self.generate_augmented_spectrogram(audio)
+                yield spectrogram
 
-                if self.split_spectrogram_duration_s is not None:
-                    desired_spectrogram_length = int(self.split_spectrogram_duration_s/0.02) # each window is 20 ms long
-                    if spectrogram.shape[0] > desired_spectrogram_length+20:
-                        for start_index in range(20, spectrogram.shape[0]-desired_spectrogram_length, desired_spectrogram_length):
-                            yield spectrogram[start_index:start_index+desired_spectrogram_length,:]
-                    else:
-                        yield spectrogram
-                elif self.truncate_spectrogram_duration_s is not None:
-                    desired_spectrogram_length = int(self.truncate_spectrogram_duration_s/0.02)
-                    yield spectrogram[-desired_spectrogram_length:]
-                else:
-                    yield spectrogram
+                # if self.split_spectrogram_duration_s is not None:
+                #     desired_spectrogram_length = int(self.split_spectrogram_duration_s/0.02) # each window is 20 ms long
+                #     if spectrogram.shape[0] > desired_spectrogram_length+20:
+                #         for start_index in range(20, spectrogram.shape[0]-desired_spectrogram_length, desired_spectrogram_length):
+                #             yield spectrogram[start_index:start_index+desired_spectrogram_length,:]
+                #     else:
+                #         yield spectrogram
+                # elif self.truncate_spectrogram_duration_s is not None:
+                #     desired_spectrogram_length = int(self.truncate_spectrogram_duration_s/0.02)
+                #     yield spectrogram[-desired_spectrogram_length:]
+                # else:
+                #     yield spectrogram
 
 
     def save_augmented_features(self, mmap_output_dir, split=None, repeat=1):

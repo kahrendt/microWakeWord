@@ -36,6 +36,11 @@ import webrtcvad
 
 import warnings
 
+import sys
+sys.path.append('/Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/piper-sample-generator')
+
+from generate_samples_generator import generate_samples
+
 def remove_silence(
     x: np.ndarray,
     frame_duration: float = 0.030,
@@ -162,7 +167,18 @@ class ClipsHandler:
         split_spectrogram_duration_s=None,
         truncate_spectrogram_duration_s=None,
         min_jitter_s=None,
+        generator_settings=None,
+        background_min_db=-10,
+        background_max_db=10,
+        **kwargs,
     ):
+        if generator_settings is not None:
+            self.generator = generate_samples(**generator_settings)
+            #generate_samples(['ə lɛk sə, ', 'ə lɛk sʌ, ', 'ɐ lɛk sə, ', 'ɐ lɛk sʌ, '],
+                             #             batch_size=200, slerp_weights = [0.8], length_scales=[0.8,0.9,1.0], #noise_scales=[0.98],max_speakers=600, phoneme_input=True)
+        else:
+            self.generator = None
+        
         #######################
         # Setup augmentations #
         #######################
@@ -180,8 +196,8 @@ class ClipsHandler:
             background_noise_augment = audiomentations.AddBackgroundNoise(
                 p=augmentation_probabilities["AddBackgroundNoise"],
                 sounds_path=background_paths,
-                min_snr_db=-10,
-                max_snr_db=15,
+                min_snr_db=background_min_db,
+                max_snr_db=background_max_db,
             )
 
         if impulse_paths is not None:
@@ -217,20 +233,25 @@ class ClipsHandler:
                     max_snr_db=30,
                 ),
                 background_noise_augment,
-                audiomentations.OneOf(
-                    transforms=[
-                        audiomentations.Gain(
-                            p=augmentation_probabilities["Gain"],
-                            min_gain_in_db=-12,
-                            max_gain_in_db=0,
-                        ),
-                        audiomentations.GainTransition(
-                            p=augmentation_probabilities["Gain"],
-                            min_gain_db=-12,
-                            max_gain_in_db=0,
-                        ),
-                    ]
+                audiomentations.GainTransition(
+                    p=augmentation_probabilities["Gain"],
+                    min_gain_db=-12,
+                    max_gain_in_db=0,
                 ),
+                # audiomentations.OneOf(
+                #     transforms=[
+                #         audiomentations.Gain(
+                #             p=augmentation_probabilities["Gain"],
+                #             min_gain_in_db=-12,
+                #             max_gain_in_db=0,
+                #         ),
+                #         audiomentations.GainTransition(
+                #             p=augmentation_probabilities["Gain"],
+                #             min_gain_db=-12,
+                #             max_gain_in_db=0,
+                #         ),
+                #     ]
+                # ),                
                 reverb_augment,
             ],
             shuffle=False,
@@ -253,6 +274,7 @@ class ClipsHandler:
             if augmented_duration_s is not None:
                 max_clip_duration_s = min(max_clip_duration_s, augmented_duration_s)
 
+        self.max_clip_duration_s = max_clip_duration_s
         self.max_jitter_s = max_jitter_s
         self.min_jitter_s = min_jitter_s
         self.max_start_time_from_right_s = max_start_time_from_right_s
@@ -437,6 +459,15 @@ class ClipsHandler:
         """
         rand_augmented_clip = self.augment_random_clip()
         return generate_features_for_clip(rand_augmented_clip)
+    
+    def generate_clip_and_augmented_spectrogram(self):
+        while (True):
+            clip = (np.squeeze(next(self.generator))/32768).astype(np.float32)
+            if self.max_clip_duration_s is None or clip.shape[0] < 16000*self.max_clip_duration_s:
+                break
+        augmented_audio = self.augment_clip(clip)
+        yield generate_features_for_clip(augmented_audio)
+        
 
     def augmented_features_generator(self, split=None, repeat=1):
         """Generator function for augmenting all loaded clips and computing their spectrograms
@@ -509,16 +540,17 @@ class ClipsHandler:
                 max_samples_from_end = int(self.max_start_time_from_right_s * sr)
             elif self.max_jitter_s is not None:
                 if self.min_jitter_s is not None:
-                    min_samples_from_end = len(x) + int(self.min_jitter_s)*sr
+                    min_samples_from_end = len(x) + int(self.min_jitter_s*sr)
                 max_samples_from_end = len(x) + int(self.max_jitter_s * sr)
             else:
                 max_samples_from_end = self.desired_samples
 
             assert max_samples_from_end > len(x)
+            # assert min_samples_from_end >= len(x)
 
             samples_from_end = np.random.randint(min_samples_from_end, max_samples_from_end) + 1
             # samples_from_end = np.random.randint(len(x), max_samples_from_end) + 1
-
+            assert samples_from_end >= len(x)
             dat[-samples_from_end : -samples_from_end + len(x)] = x
         elif len(x) > self.desired_samples:
             samples_from_start = np.random.randint(0, len(x)-self.desired_samples)

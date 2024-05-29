@@ -3,63 +3,86 @@ binary_classification: false
 clip_duration_ms: 210
 eval_step_interval: 500
 features:
-- features_dir: /Volumes/MachineLearning/training_data/alexa/positive_min_end_jitter
+- features_dir: training_sets/alexa/fast_speech_eval_mit
   penalty_weight: 1
   sampling_weight: 0.0
   truncation_strategy: truncate_start
   truth: true
   type: mmap
 - augmentation_probabilities:
-    AddBackgroundNoise: 0.75
+    AddBackgroundNoise: 0.95
     AddColorNoise: 0.25
-    BandStopFilter: 0.1
+    BandStopFilter: 0.0
     Gain: 1.0
-    PitchShift: 0.1
+    PitchShift: 0.0
     RIR: 0.5
-    SevenBandParametricEQ: 0.1
-    TanhDistortion: 0.1
-  augmented_duration_s: 2.99
+    SevenBandParametricEQ: 0.0
+    TanhDistortion: 0.0
+  augmented_duration_s: 3.99
+  background_max_db: 5
+  background_min_db: -10
   background_paths:
-  - /Volumes/MachineLearning/audio_samples/background_noise_samples/background_clips_for_mixing
-  features_dir: /Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/piper-sample-generator/output/alexa
+  - /Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/microWakeWord/notebooks/mixing/background_clips
+  generate: false
+  generator_settings:
+    batch_size: 200
+    length_scales:
+    - 0.7
+    - 0.8
+    - 0.9
+    - 1.0
+    max_speakers: 600
+    noise_scales:
+    - 0.98
+    noise_scales_ws:
+    - 0.98
+    phoneme_input: true
+    slerp_weights:
+    - 0.8
+    text:
+    - "\u0259 l\u025Bk s\u0259, "
+    - "\u0259 l\u025Bk s\u028C, "
+    - "\u0250 l\u025Bk s\u0259, "
+    - "\u0250 l\u025Bk s\u028C, "
   impulse_paths:
-  - /Volumes/MachineLearning/audio_samples/background_noise_samples/wav_16k/bird_rir_all_channels_16k
-  input_glob: '*2/*.wav'
-  max_clip_duration_s: 1.37
-  max_jitter_s: 0.2
-  max_start_time_from_right_s: null
-  min_clip_duration_s: null
-  min_jitter_s: 0.05
+  - mit_rirs
+  input_glob: '*.wav'
+  input_path: /Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/piper-sample-generator/output/alexa/fast_speech
+  max_clip_duration_s: 1.19
+  max_jitter_s: null
+  max_start_time_from_right_s: 1.5
+  min_clip_duration_s: 0.5
+  min_jitter_s: null
   penalty_weight: 1
-  sampling_weight: 0.5
+  sampling_weight: 0.3
   truncation_strategy: truncate_start
   truth: true
   type: clips
-- features_dir: /Volumes/MachineLearning/training_data/alexa/old_negative
-  penalty_weight: 0.5
-  sampling_weight: 0.5
+- features_dir: training_sets/alexa/negative_mit
+  penalty_weight: 0.33
+  sampling_weight: 0.1
   truncation_strategy: truncate_start
   truth: false
   type: mmap
-- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/speech_background_new
+- features_dir: training_sets/speech_background_new
   penalty_weight: 1
-  sampling_weight: 4
+  sampling_weight: 6.0
   truncation_strategy: random
   truth: false
   type: mmap
-- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/dinner_party_background_new
-  penalty_weight: 1
-  sampling_weight: 3
-  truncation_strategy: random
-  truth: false
-  type: mmap
-- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/no_speech_background_new
+- features_dir: training_sets/dinner_party_background_new
   penalty_weight: 1
   sampling_weight: 3
   truncation_strategy: random
   truth: false
   type: mmap
-- features_dir: /Volumes/MachineLearning/training_data/negative_datasets/ambient_background
+- features_dir: training_sets/no_speech_background_new
+  penalty_weight: 1
+  sampling_weight: 1.5
+  truncation_strategy: random
+  truth: false
+  type: mmap
+- features_dir: training_sets/ambient_background
   penalty_weight: 1
   sampling_weight: 0.0
   truncation_strategy: split
@@ -68,7 +91,7 @@ features:
 freq_mask_count:
 - 2
 freq_mask_max_size:
-- 4
+- 7
 freq_mix_augmentation_prob:
 - 0
 learning_rates:
@@ -81,15 +104,18 @@ mix_up_augmentation_prob:
 - 0
 negative_class_weight:
 - 1
+- 2
 - 3
-- 5
+- 4
 positive_class_weight:
 - 1
-target_minimization: 1.0
+target_minimization: 0.5
 time_mask_count:
-- 0
+- 2
 time_mask_max_size:
-- 10
-train_dir: trained_models/changes_revert_test
+- 3
+train_dir: trained_models/alexa_medium_from_right
 training_steps:
-- 500
+- 20000
+- 20000
+- 20000

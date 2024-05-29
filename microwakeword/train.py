@@ -72,7 +72,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         )
         model.reset_metrics()
         
-        cutoffs = np.arange(0.5,1.01,0.01)
+        cutoffs = np.arange(0.01,1.01,0.01)
         batch_sum_false_positives = np.zeros(cutoffs.shape[0])
         
         for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
@@ -82,22 +82,16 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             
             for index, cutoff in enumerate(cutoffs):
                 batch_sum_false_positives[index] += sum(ambient_predictions > cutoff)
-            # ambient_result = model.test_on_batch(
-            #     ambient_testing_fingerprints[i : i + test_batch_size],
-            #     ambient_testing_ground_truth[i : i + test_batch_size],
-            #     reset_metrics=False,
-            # )
-
-        # estimated_ambient_false_positives_per_hour = ambient_false_positives / (
-        #     data_processor.get_mode_duration("validation_ambient") / 3600.0
-        # )
 
         batch_sum_false_positives_per_hour = batch_sum_false_positives/ (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
         )
 
-        ambient_false_positives = batch_sum_false_positives[0]
-        estimated_ambient_false_positives_per_hour = batch_sum_false_positives_per_hour[0]
+        false_positive_rates = batch_sum_false_positives/len(ambient_testing_fingerprints)
+
+        ambient_false_positives = batch_sum_false_positives[50] # TODO, don't use hardcoded 50
+        estimated_ambient_false_positives_per_hour = batch_sum_false_positives_per_hour[50]
+        max_auc = 0.0
         
         target_faph_cutoff_probability = 1.0
         for index, cutoff in enumerate(cutoffs):
@@ -108,6 +102,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         if target_faph_cutoff_probability < 1.0:
             total_positive_sample_count = 0
             total_predicted_at_cutoff = 0
+            total_predicted_cutoffs = np.zeros(cutoffs.shape[0])
             for i in range(0, len(testing_fingerprints), test_batch_size):
                 predictions = model.predict_on_batch(
                     testing_fingerprints[i : i + test_batch_size]
@@ -117,20 +112,59 @@ def validate_nonstreaming(config, data_processor, model, test_set):
                 # )        
                 total_positive_sample_count += sum(testing_ground_truth[i : i + test_batch_size])
                 total_predicted_at_cutoff += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > target_faph_cutoff_probability)
+                for index, cutoff in enumerate(cutoffs):
+                    total_predicted_cutoffs[index] += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > cutoff)
             
             recall_at_no_faph = total_predicted_at_cutoff[0]/total_positive_sample_count
+            
+            recall_at_cutoffs = total_predicted_cutoffs/total_positive_sample_count
 
+            x_coordinates = [1.0]
+            y_coordinates = [1.0]
+            
+            for index in range(0,len(recall_at_cutoffs)):
+                if false_positive_rates[index] != x_coordinates[-1]:
+                    x_coordinates.append(false_positive_rates[index])
+                    y_coordinates.append(recall_at_cutoffs[index])
+            
+            max_auc = np.trapz(np.flip(y_coordinates),np.flip(x_coordinates))
+            
+            # false_reject_at_cutoffs = 1-recall_at_cutoffs
+
+            # x_coordinates = [5.0]# [batch_sum_false_positives_per_hour[0]]
+            # y_coordinates = [false_reject_at_cutoffs[0]]
+            
+            # for index in range(1, len(batch_sum_false_positives_per_hour)):
+            #     if batch_sum_false_positives_per_hour[index] < x_coordinates[-1]:
+            #         x_coordinates.append(batch_sum_false_positives[index])
+            #         y_coordinates.append(false_reject_at_cutoffs[index])
+            
+            # x_coordinates = np.array(x_coordinates)
+            # y_coordinates = np.array(y_coordinates)
+            # x_coordinates = x_coordinates[(x_coordinates < 5.0).nonzero()]
+            # y_coordinates = y_coordinates[(x_coordinates < 5.0).nonzero()]
+            
+            # # First coordinate should be at 5.0 faph
+            # np.insert(x_coordinates, 0, 5.0)
+            # np.insert(y_coordinates, 0, y_coordinates[0])
+            
+            # auc = np.trapz(np.flip(y_coordinates), np.flip(x_coordinates))
+            # max_auc = 5-auc
+                
+            
         metrics["recall_at_no_faph"] = recall_at_no_faph
         metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
         metrics["ambient_false_positives"] = ambient_false_positives
         metrics["ambient_false_positives_per_hour"] = (
             estimated_ambient_false_positives_per_hour
         )
+        metrics["max_auc"] = max_auc
     else:
         metrics["recall_at_no_faph"] = 0
         metrics["cutoff_for_no_faph"] = 0
         metrics["ambient_false_positives"] = 0
         metrics["ambient_false_positives_per_hour"] = 0
+        metrics["max_auc"] = 0
     return metrics
 
 
@@ -303,7 +337,7 @@ def train(model, config, data_processor):
             )
             model.reset_metrics()   # reset metrics for next validation epoch of training
             logging.info(
-                "Step %d (nonstreaming): Validation: recall at no faph = %.3f, accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f,",
+                "Step %d (nonstreaming): Validation: recall at no faph = %.3f, accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f,, max_auc = %.9f",
                 *(
                     training_step,
                     nonstreaming_metrics["recall_at_no_faph"] * 100,
@@ -316,6 +350,7 @@ def train(model, config, data_processor):
                     nonstreaming_metrics["ambient_false_positives_per_hour"],
                     nonstreaming_metrics["loss"],
                     nonstreaming_metrics["auc"],
+                    nonstreaming_metrics["max_auc"],
                 ),
             )
 

@@ -75,13 +75,19 @@ def model_parameters(parser_nn):
         "--max_pool",
         type=int,
         default=0,
-        help="apply max pool instead of aver4age pool before final convolution and sigmoid activation",
+        help="apply max pool instead of average pool before final convolution and sigmoid activation",
     )
     parser_nn.add_argument(
         "--first_conv_filters",
         type=int,
         default=0,
         help="Number of filters on initial convolution layer. Set to 0 to disable",
+    )
+    parser_nn.add_argument(
+        "--spatial_attention",
+        type=int,
+        default=0,
+        help="add a spatial attention layer before the final pooling layer",
     )
 
 
@@ -197,7 +203,42 @@ class MixConv(object):
         x = tf.concat(x_outputs, self._channel_axis)
         return x
 
+class SpatialAttention(object):
+    """Spatial Attention Layer based on CBAM: Convolutional Block Attention Module
+    https://arxiv.org/pdf/1807.06521v2
 
+    Args:
+        object (_type_): _description_
+    """
+    def __init__(self, kernel_size, ring_buffer_size, **kwargs):
+        self.kernel_size = kernel_size
+        self.ring_buffer_size= ring_buffer_size
+        
+    def __call__(self, inputs):
+        tranposed = tf.transpose(inputs,perm=[0,1,3,2])
+        channel_avg = tf.keras.layers.AveragePooling2D(pool_size=(1, tranposed.shape[2]), strides=(1,tranposed.shape[2]))(tranposed)
+        channel_max = tf.keras.layers.MaxPooling2D(pool_size=(1, tranposed.shape[2]), strides=(1,tranposed.shape[2]))(tranposed)
+        pooled = tf.keras.layers.Concatenate(axis=-1)([channel_avg, channel_max])
+        attention = stream.Stream(
+                cell=tf.keras.layers.Conv2D(
+                    1,
+                    (self.kernel_size, 1),
+                    strides=(1, 1),
+                    padding="valid",
+                    use_bias=False,
+                    activation="sigmoid",
+                ),
+            use_one_step=False)(pooled)
+
+        net = stream.Stream(
+            cell=tf.identity,
+            ring_buffer_size_in_time_dim=self.ring_buffer_size,
+            use_one_step=False,
+        )(inputs)
+        net = net[:,-attention.shape[1]:,:,:]
+
+        return net*attention
+        
 def model(flags, shape, batch_size):
     """MixedNet model.
 
@@ -253,7 +294,21 @@ def model(flags, shape, batch_size):
         )(net)
 
         net = tf.keras.layers.Activation("relu")(net)
-
+        
+        ###
+        # Squeeze and Excitation block
+        # Based on Depthwise Separable Convolutional ResNet with Squeeze-and-Excitation Blocks for Small-footprint Keyword Spotting
+        # https://arxiv.org/pdf/2004.12200
+        ###
+        x = stream.Stream(
+            cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
+        )(net)
+        x = tf.keras.layers.Flatten()(x)
+        x = tf.keras.layers.Dense(flags.first_conv_filters//16, activation='relu')(x)
+        x = tf.keras.layers.Dense(flags.first_conv_filters, activation='sigmoid')(x)
+        net = tf.keras.layers.Multiply()([net,x])
+        
+        
     # encoder
     for filters, repeat, ksize, res in zip(
         pointwise_filters,
@@ -266,15 +321,16 @@ def model(flags, shape, batch_size):
                 filters=filters, kernel_size=1, use_bias=False, padding="same"
             )(net)
             residual = tf.keras.layers.BatchNormalization()(residual)
-            residual = tf.keras.layers.Activation("relu")(residual)
+            # residual = tf.keras.layers.Activation("relu")(residual)
 
         for _ in range(repeat):
-            net = MixConv(kernel_size=ksize)(net)
+            if max(ksize) > 1:
+                net = MixConv(kernel_size=ksize)(net)
             net = tf.keras.layers.Conv2D(
                 filters=filters, kernel_size=1, use_bias=False, padding="same"
             )(net)
             net = tf.keras.layers.BatchNormalization()(net)
-            net = tf.keras.layers.Activation("relu")(net)
+            # net = tf.keras.layers.Activation("relu")(net)
 
             if res:
                 residual = strided_drop.StridedDrop(residual.shape[1] - net.shape[1])(
@@ -282,17 +338,30 @@ def model(flags, shape, batch_size):
                 )
                 net = net + residual
 
+            net = tf.keras.layers.Activation("relu")(net)
+
+
+    if flags.spatial_attention:
+        net = SpatialAttention(5,net.shape[1]-1)(net)
+    else:
+        net = stream.Stream(
+                cell=tf.identity,
+                ring_buffer_size_in_time_dim=net.shape[1]-1,
+                use_one_step=False,
+            )(net)
     # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regular pooling operations
     if net.shape[1] > 1:
         if flags.max_pool:
-            net = stream.Stream(
-                cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
-            )(net)
+            # net = stream.Stream(
+            #     cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
+            # )(net)
+            net = tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))(net)
         else:
-            net = stream.Stream(
-                cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
-            )(net)
-
+            net = tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))(net)
+            # net = stream.Stream(
+            #     cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
+            # )(net)
+            
     net = tf.keras.layers.Flatten()(net)
     net = tf.keras.layers.Dense(1, activation="sigmoid")(net)
 

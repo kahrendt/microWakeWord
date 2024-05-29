@@ -92,7 +92,7 @@ class Model:
         # Get the prediction for each chunk
         predictions = []
         for chunk in chunks:
-            if self.is_quantized_model:
+            if self.is_quantized_model and spec.dtype != np.int8:
                 chunk = self.quantize_input_data(chunk, self.input_details[0])
 
             self.model.set_tensor(

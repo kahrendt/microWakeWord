@@ -18,7 +18,6 @@
 from microwakeword.layers import modes
 from microwakeword.layers import stream
 from microwakeword.layers import strided_drop
-from microwakeword.layers import sub_spectral_normalization
 
 import ast
 import tensorflow as tf
@@ -143,7 +142,7 @@ def spectrogram_slices_dropped(flags):
     Returns:
         int: number of spectrogram slices dropped
     """
-    spectrogram_slices_dropped = 4 # initial 5x5 convolution drops 4
+    spectrogram_slices_dropped = 0
 
     for kernel_size, dilation, residual, repeat in zip(
         parse(flags.ds_kernel_size),
@@ -332,29 +331,8 @@ def model(flags, shape, batch_size):
     )
     net = input_audio
 
-    # make it [batch, time, feature, 1]
-    net = tf.keras.backend.expand_dims(net, axis=3)
-    
-    # Streaming Conv2D with 'valid' padding
-    net = stream.Stream(
-        cell=tf.keras.layers.Conv2D(
-            32, (5, 5), strides=(1,2), padding="valid", use_bias=False
-        ),
-        use_one_step=True,
-        pad_time_dim=None,
-        pad_freq_dim="same",
-    )(net)
-    sub_spectral_normalization_layer = (
-        sub_spectral_normalization.SubSpectralNormalization(5)
-    )
-    net = sub_spectral_normalization_layer(net)
-    net = tf.keras.layers.Activation("relu")(net)
-    
-    net = tf.keras.layers.DepthwiseConv2D(
-        kernel_size=(1, net.shape[2]), padding="valid"
-    )(net)
-    net = tf.keras.layers.BatchNormalization(scale=flags.ds_scale)(net)
-    net = tf.keras.layers.Activation("relu")(net)    
+    # make it [batch, time, 1, feature]
+    net = tf.keras.backend.expand_dims(net, axis=2)
 
     # encoder
     for filters, filters2, repeat, ksize, stride, dilation, res, pool, pad in zip(
@@ -384,6 +362,7 @@ def model(flags, shape, batch_size):
 
     # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regulr pooling operations
     if net.shape[1] > 1:
+        tf.transpose(net, perm=[0, 1, 3, 2])
         if flags.max_pool:
             net = stream.Stream(
                 cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
@@ -392,6 +371,7 @@ def model(flags, shape, batch_size):
             net = stream.Stream(
                 cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
             )(net)
+        tf.transpose(net, perm=[0, 1, 3, 2])
 
     net = tf.keras.layers.Dropout(rate=flags.dropout_final_layer)(net)
     net = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)(net)
