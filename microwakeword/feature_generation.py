@@ -36,10 +36,10 @@ import webrtcvad
 
 import warnings
 
-import sys
-sys.path.append('/Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/piper-sample-generator')
+# import sys
+# sys.path.append('/Users/kahrendt/Documents/Hobbies/Programming/Git-Repositories/piper-sample-generator')
 
-from generate_samples_generator import generate_samples
+# from generate_samples_generator import generate_samples
 
 def remove_silence(
     x: np.ndarray,
@@ -172,12 +172,13 @@ class ClipsHandler:
         background_max_db=10,
         **kwargs,
     ):
-        if generator_settings is not None:
-            self.generator = generate_samples(**generator_settings)
-            #generate_samples(['ə lɛk sə, ', 'ə lɛk sʌ, ', 'ɐ lɛk sə, ', 'ɐ lɛk sʌ, '],
-                             #             batch_size=200, slerp_weights = [0.8], length_scales=[0.8,0.9,1.0], #noise_scales=[0.98],max_speakers=600, phoneme_input=True)
-        else:
-            self.generator = None
+        # if generator_settings is not None:
+        #     self.generator = generate_samples(**generator_settings)
+        #     #generate_samples(['ə lɛk sə, ', 'ə lɛk sʌ, ', 'ɐ lɛk sə, ', 'ɐ lɛk sʌ, '],
+        #                      #             batch_size=200, slerp_weights = [0.8], length_scales=[0.8,0.9,1.0], #noise_scales=[0.98],max_speakers=600, phoneme_input=True)
+        # else:
+        #     self.generator = None
+        self.generator = None
         
         #######################
         # Setup augmentations #

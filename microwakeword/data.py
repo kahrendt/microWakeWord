@@ -25,7 +25,7 @@ from absl import logging
 from pathlib import Path
 from mmap_ninja.ragged import RaggedMmap
 from microwakeword.feature_generation import ClipsHandler
-from microwakeword.room_simulation_feature_generation import RoomClipsHandler
+# from microwakeword.room_simulation_feature_generation import RoomClipsHandler
 
 def spec_augment(
     spectrogram,
