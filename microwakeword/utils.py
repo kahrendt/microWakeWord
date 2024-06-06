@@ -303,14 +303,14 @@ def convert_saved_model_to_tflite(
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    sample_fingerprints, _, _ = audio_processor.get_data(
-        "training", 500, features_length=config["spectrogram_length"]
-    )
-
-    sample_fingerprints[0][0, 0] = 0.0  # guarantee one pixel is the preprocessor min
-    sample_fingerprints[0][0, 1] = 26.0  # guarantee one pixel is the preprocessor max
-
     def representative_dataset_gen():
+        sample_fingerprints, _, _ = audio_processor.get_data(
+            "training", 500, features_length=config["spectrogram_length"]
+        )
+
+        sample_fingerprints[0][0, 0] = 0.0  # guarantee one pixel is the preprocessor min
+        sample_fingerprints[0][0, 1] = 26.0  # guarantee one pixel is the preprocessor max
+        
         for spectrogram in sample_fingerprints:
             for i in range(spectrogram.shape[0]):
                 yield [spectrogram[i, :].astype(np.float32)]

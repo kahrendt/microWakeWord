@@ -231,18 +231,18 @@ def evaluate_model(
             quantize=quantize,
         )
 
-        for dataset in testing_datasets:
-            logging.info(
-                "Testing the TFLite " + log_string + " on the " + dataset + " set"
-            )
-            test.tflite_model_accuracy(
-                config,
-                output_folder,
-                data_processor,
-                data_set=dataset,
-                tflite_model_name=filename,
-                accuracy_name=dataset + "_set_metrics.txt",
-            )
+        # for dataset in testing_datasets:
+        #     logging.info(
+        #         "Testing the TFLite " + log_string + " on the " + dataset + " set"
+        #     )
+        #     test.tflite_model_accuracy(
+        #         config,
+        #         output_folder,
+        #         data_processor,
+        #         data_set=dataset,
+        #         tflite_model_name=filename,
+        #         accuracy_name=dataset + "_set_metrics.txt",
+        #     )
 
 
 if __name__ == "__main__":

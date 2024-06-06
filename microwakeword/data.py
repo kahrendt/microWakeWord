@@ -195,10 +195,16 @@ class MmapFeatureGenerator(object):
             spectrogram,
             features_length,
             truncation_strategy,
-        )
+        )    
+        
         # if spectrogram.shape[-1] == 40:
         #     blank_playback = np.zeros(spectrogram.shape)
         #     spectrogram = np.concatenate([spectrogram, blank_playback], axis=-1)
+        
+        # Spectrograms with type np.uint16 haven't been scaled
+        if np.issubdtype(spectrogram.dtype, np.uint16):
+            spectrogram = spectrogram.astype(np.float32) * 0.0390625    
+                    
         return spectrogram
 
     def get_feature_generator(
@@ -212,6 +218,11 @@ class MmapFeatureGenerator(object):
             
         for feature in self.feature_sets[mode]:
             spectrogram = self.loaded_features[feature["loaded_feature_index"]][feature["subindex"]]
+
+            # Spectrograms with type np.uint16 haven't been scaled
+            if np.issubdtype(spectrogram.dtype, np.uint16):
+                spectrogram = spectrogram.astype(np.float32) * 0.0390625            
+            
             if truncation_strategy == "split":
                 for feature_start_index in range(0, spectrogram.shape[0]-features_length, 10):
                     split_spectrogram = spectrogram[feature_start_index : feature_start_index + features_length]
@@ -219,7 +230,7 @@ class MmapFeatureGenerator(object):
                     # if split_spectrogram.shape[-1] == 40:
                     #     blank_playback = np.zeros(split_spectrogram.shape)
                     #     split_spectrogram = np.concatenate([split_spectrogram, blank_playback], axis=-1)
-                        
+
                     yield split_spectrogram
             else:
                 spectrogram = fixed_length_spectrogram(
@@ -231,6 +242,7 @@ class MmapFeatureGenerator(object):
                 # if spectrogram.shape[-1] == 40:
                 #     blank_playback = np.zeros(spectrogram.shape)
                 #     spectrogram = np.concatenate([spectrogram, blank_playback], axis=-1)
+                
                 yield spectrogram
     
     # def get_split_feature_generator(
@@ -288,6 +300,10 @@ class ClipsHandlerWrapperGenerator(object):
         # if spectrogram.shape[-1] == 40:
         #     blank_playback = np.zeros(spectrogram.shape)
         #     spectrogram = np.concatenate([spectrogram, blank_playback], axis=-1)
+        
+        # Spectrograms with type np.uint16 haven't been scaled
+        if np.issubdtype(spectrogram.dtype, np.uint16):
+            spectrogram = spectrogram.astype(np.float32) * 0.0390625            
         
         return spectrogram
 
@@ -347,24 +363,24 @@ class FeatureHandler(object):
                 #                 split_spectrogram_duration_s=None,
                 #             )
                 self.feature_providers.append(ClipsHandlerWrapperGenerator(clips_handler, feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"], feature_set['generate']))
-            elif feature_set["type"] == "room_clips":
-                clips_handler = RoomClipsHandler(
-                                input_path=feature_set['features_dir'],
-                                input_glob=feature_set["input_glob"],
-                                impulse_path=feature_set["impulse_path"],
-                                impulse_glob=feature_set["impulse_glob"],
-                                playback_background_path=feature_set["playback_background_path"], 
-                                playback_background_glob=feature_set["playback_background_glob"], 
-                                background_path=feature_set["background_path"], 
-                                background_glob=feature_set["background_glob"], 
-                                augmented_duration_s =feature_set["augmented_duration_s"],
-                                max_start_time_from_right_s = None,
-                                max_jitter_s = feature_set["max_jitter_s"],
-                                min_jitter_s = feature_set["min_jitter_s"],
-                                max_clip_duration_s = feature_set["max_clip_duration_s"], 
-                                min_clip_duration_s = feature_set["min_clip_duration_s"],
-                            )
-                self.feature_providers.append(ClipsHandlerWrapperGenerator(clips_handler, feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"], feature_set['generate']))
+            # elif feature_set["type"] == "room_clips":
+            #     clips_handler = RoomClipsHandler(
+            #                     input_path=feature_set['features_dir'],
+            #                     input_glob=feature_set["input_glob"],
+            #                     impulse_path=feature_set["impulse_path"],
+            #                     impulse_glob=feature_set["impulse_glob"],
+            #                     playback_background_path=feature_set["playback_background_path"], 
+            #                     playback_background_glob=feature_set["playback_background_glob"], 
+            #                     background_path=feature_set["background_path"], 
+            #                     background_glob=feature_set["background_glob"], 
+            #                     augmented_duration_s =feature_set["augmented_duration_s"],
+            #                     max_start_time_from_right_s = None,
+            #                     max_jitter_s = feature_set["max_jitter_s"],
+            #                     min_jitter_s = feature_set["min_jitter_s"],
+            #                     max_clip_duration_s = feature_set["max_clip_duration_s"], 
+            #                     min_clip_duration_s = feature_set["min_clip_duration_s"],
+            #                 )
+            #     self.feature_providers.append(ClipsHandlerWrapperGenerator(clips_handler, feature_set["truth"], feature_set["sampling_weight"], feature_set["penalty_weight"], feature_set["truncation_strategy"], feature_set['generate']))
 
     def get_mode_duration(self, mode):
         """Returns the durations of all spectrogram features in the given mode.
@@ -468,6 +484,9 @@ class FeatureHandler(object):
                     augmentation_policy["freq_mask_max_size"],
                     augmentation_policy["freq_mask_count"],
                 )
+                
+
+                
                 data.append(spectrogram)
                 labels.append(float(provider.label))
                 weights.append(float(provider.penalty_weight))

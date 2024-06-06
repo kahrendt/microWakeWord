@@ -104,6 +104,7 @@ def spectrogram_slices_dropped(flags):
 
     # initial 3x1 convolution drops 2
     if flags.first_conv_filters > 0:
+        # spectrogram_slices_dropped += 4
         spectrogram_slices_dropped += 2
 
     for repeat, ksize in zip(
@@ -283,6 +284,7 @@ def model(flags, shape, batch_size):
         net = stream.Stream(
             cell=tf.keras.layers.Conv2D(
                 flags.first_conv_filters,
+                # (5, 1),
                 (3, 1),
                 strides=(1, 1),
                 padding="valid",
@@ -295,18 +297,18 @@ def model(flags, shape, batch_size):
 
         net = tf.keras.layers.Activation("relu")(net)
         
-        ###
-        # Squeeze and Excitation block
-        # Based on Depthwise Separable Convolutional ResNet with Squeeze-and-Excitation Blocks for Small-footprint Keyword Spotting
-        # https://arxiv.org/pdf/2004.12200
-        ###
-        x = stream.Stream(
-            cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
-        )(net)
-        x = tf.keras.layers.Flatten()(x)
-        x = tf.keras.layers.Dense(flags.first_conv_filters//16, activation='relu')(x)
-        x = tf.keras.layers.Dense(flags.first_conv_filters, activation='sigmoid')(x)
-        net = tf.keras.layers.Multiply()([net,x])
+        # ###
+        # # Squeeze and Excitation block
+        # # Based on Depthwise Separable Convolutional ResNet with Squeeze-and-Excitation Blocks for Small-footprint Keyword Spotting
+        # # https://arxiv.org/pdf/2004.12200
+        # ###
+        # x = stream.Stream(
+        #     cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1), strides=(net.shape[1], 1))
+        # )(net)
+        # x = tf.keras.layers.Flatten()(x)
+        # x = tf.keras.layers.Dense(flags.first_conv_filters//16, activation='relu')(x)
+        # x = tf.keras.layers.Dense(flags.first_conv_filters, activation='sigmoid')(x)
+        # net = tf.keras.layers.Multiply()([net,x])
         
         
     # encoder
@@ -340,17 +342,17 @@ def model(flags, shape, batch_size):
 
             net = tf.keras.layers.Activation("relu")(net)
 
-
-    if flags.spatial_attention:
-        net = SpatialAttention(5,net.shape[1]-1)(net)
-    else:
-        net = stream.Stream(
-                cell=tf.identity,
-                ring_buffer_size_in_time_dim=net.shape[1]-1,
-                use_one_step=False,
-            )(net)
-    # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regular pooling operations
     if net.shape[1] > 1:
+        if flags.spatial_attention:
+            net = SpatialAttention(5,net.shape[1]-1)(net)
+        else:
+            net = stream.Stream(
+                    cell=tf.identity,
+                    ring_buffer_size_in_time_dim=net.shape[1]-1,
+                    use_one_step=False,
+                )(net)
+        # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regular pooling operations
+
         if flags.max_pool:
             # net = stream.Stream(
             #     cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
@@ -361,8 +363,11 @@ def model(flags, shape, batch_size):
             # net = stream.Stream(
             #     cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
             # )(net)
-            
+    
     net = tf.keras.layers.Flatten()(net)
     net = tf.keras.layers.Dense(1, activation="sigmoid")(net)
-
+    
+    # net = stream.Stream(cell=tf.keras.layers.Flatten())(net)
+    # net = tf.keras.layers.Dense(1, activation="sigmoid")(net)
+    
     return tf.keras.Model(input_audio, net)

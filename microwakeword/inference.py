@@ -68,9 +68,9 @@ class Model:
         """
 
         # Get the spectrogram
-        spec = generate_features_for_clip(data)
-
-        return self.predict_spectrogram(spec)
+        spectrogram = generate_features_for_clip(data)
+        
+        return self.predict_spectrogram(spectrogram)
 
     def predict_spectrogram(self, spec):
         """Run the model on a single clip of audio data
@@ -81,6 +81,9 @@ class Model:
         Returns:
             list: model predictions for the input audio data
         """
+
+        if np.issubdtype(spec.dtype, np.uint16):
+            spec = spec.astype(np.float32) * 0.0390625   
 
         # Slice the input data into the required number of chunks
         chunks = []

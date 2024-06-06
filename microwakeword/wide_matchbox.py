@@ -362,7 +362,7 @@ def model(flags, shape, batch_size):
 
     # We want to use either Global Max Pooling or Global Average Pooling, but the esp-nn operator optimizations only benefit regulr pooling operations
     if net.shape[1] > 1:
-        tf.transpose(net, perm=[0, 1, 3, 2])
+        # tf.transpose(net, perm=[0, 1, 3, 2])
         if flags.max_pool:
             net = stream.Stream(
                 cell=tf.keras.layers.MaxPooling2D(pool_size=(net.shape[1], 1))
@@ -371,7 +371,7 @@ def model(flags, shape, batch_size):
             net = stream.Stream(
                 cell=tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))
             )(net)
-        tf.transpose(net, perm=[0, 1, 3, 2])
+        # tf.transpose(net, perm=[0, 1, 3, 2])
 
     net = tf.keras.layers.Dropout(rate=flags.dropout_final_layer)(net)
     net = tf.keras.layers.Conv2D(filters=1, kernel_size=1, use_bias=False)(net)

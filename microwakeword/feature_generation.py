@@ -90,11 +90,12 @@ def generate_features_for_clip(audio, desired_spectrogram_length=None):
             enable_pcan=True,
             min_signal_remaining=0.05,
             out_scale=1,
-            out_type=tf.float32,
+            out_type=tf.uint16,
+            # out_type=tf.float32,
         )
-        output = tf.multiply(micro_frontend, 0.0390625)
+        # output = tf.multiply(micro_frontend, 0.0390625)
 
-        spectrogram = output.numpy()
+        spectrogram = micro_frontend.numpy()
         if desired_spectrogram_length is not None:
             return spectrogram[
                 -desired_spectrogram_length:
@@ -254,6 +255,7 @@ class ClipsHandler:
                 #     ]
                 # ),                
                 reverb_augment,
+                audiomentations.Normalize(p=1.0),
             ],
             shuffle=False,
         )
@@ -415,6 +417,10 @@ class ClipsHandler:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore") # Suppresses warning about background clip being too quiet... TODO: find better approach!
             output_audio = self.augment(input_audio, sample_rate=16000)
+        
+        import numpy as np
+        if np.max(np.abs(output_audio) > 1):
+            print("Clipped audio")
 
         return (output_audio * 32767).astype(np.int16)
 
@@ -544,7 +550,8 @@ class ClipsHandler:
                     min_samples_from_end = len(x) + int(self.min_jitter_s*sr)
                 max_samples_from_end = len(x) + int(self.max_jitter_s * sr)
             else:
-                max_samples_from_end = self.desired_samples
+                # max_samples_from_end = self.desired_samples
+                max_samples_from_end = len(x)+1
 
             assert max_samples_from_end > len(x)
             # assert min_samples_from_end >= len(x)

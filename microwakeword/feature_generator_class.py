@@ -63,12 +63,11 @@ def generate_features_for_clip(audio, desired_spectrogram_length=None):
 class Augmentation:
     def __init__(
         self,
-        # audio_generator,
         augmentation_probabilities: dict = {
-            "SevenBandParametricEQ": 0.25,
-            "TanhDistortion": 0.25,
-            "PitchShift": 0.25,
-            "BandStopFilter": 0.25,
+            "SevenBandParametricEQ": 0.0,
+            "TanhDistortion": 0.0,
+            "PitchShift": 0.0,
+            "BandStopFilter": 0.0,
             "AddColorNoise": 0.25,
             "AddBackgroundNoise": 0.75,
             "Gain": 1.0,
@@ -76,11 +75,13 @@ class Augmentation:
         },        
         impulse_paths=None,
         background_paths=None,
+        background_min_snr_db=-10,
+        background_max_snr_db=10,
         min_jitter_s=None,
-        max_jitter_s=None,   
+        max_jitter_s=None,
+        max_start_time_from_right_s=None,
         augmentation_duration_s=None,     
     ):
-        # self.audio_generator = audio_generator
         ###
         # Configure audio duration and positioning #
         ###
@@ -95,6 +96,27 @@ class Augmentation:
         self.augmented_samples = None
         if augmentation_duration_s is not None:
             self.augmented_samples = int(augmentation_duration_s*16000)
+
+        self.max_start_time_from_right_s=max_start_time_from_right_s
+        if max_start_time_from_right_s is not None and (min_jitter_s is not None or max_jitter_s is not None):
+            raise ValueError(
+                "max_start_time_from_s and max_jitter_s/min_jitter_s cannot both be configured."
+            )
+        
+        if (max_start_time_from_right_s is not None) and (
+            augmentation_duration_s is None
+        ):
+            raise ValueError(
+                "max_start_time_from_right_s cannot be specified if augmentation_duration_s is not configured."
+            )
+
+        if (
+            (max_start_time_from_right_s is not None)
+            and (max_start_time_from_right_s > augmentation_duration_s)
+        ):
+            raise ValueError(
+                "max_start_time_from_right_s cannot be greater than augmentation_duration_s."
+            )
 
         assert self.min_jitter_samples <= self.max_jitter_samples, "Minimum jitter must be less than or equal to maximum jitter."
 
@@ -113,15 +135,15 @@ class Augmentation:
 
         if background_paths is not None:
             background_noise_augment = audiomentations.AddBackgroundNoise(
-                p=augmentation_probabilities.get("AddBackgroundNoise", 0.75),
+                p=augmentation_probabilities.get("AddBackgroundNoise", 0.0),
                 sounds_path=background_paths,
-                min_snr_db=-10,
-                max_snr_db=15,
+                min_snr_db=background_min_snr_db,
+                max_snr_db=background_max_snr_db,
             )
 
         if impulse_paths is not None:
             reverb_augment = audiomentations.ApplyImpulseResponse(
-                p=augmentation_probabilities.get("RIR", 0.5),
+                p=augmentation_probabilities.get("RIR", 0.0),
                 ir_path=impulse_paths,
             )
 
@@ -129,31 +151,31 @@ class Augmentation:
         self.augment = audiomentations.Compose(
             transforms=[
                 audiomentations.SevenBandParametricEQ(
-                    p=augmentation_probabilities.get("SevenBandParametricEQ", 0.25),
+                    p=augmentation_probabilities.get("SevenBandParametricEQ", 0.0),
                     min_gain_db=-6,
                     max_gain_db=6,
                 ),
                 audiomentations.TanhDistortion(
-                    p=augmentation_probabilities.get("TanhDistortion", 0.25),
+                    p=augmentation_probabilities.get("TanhDistortion", 0.0),
                     min_distortion=0.0001,
                     max_distortion=0.10,
                 ),
                 audiomentations.PitchShift(
-                    p=augmentation_probabilities.get("PitchShift", 0.25),
+                    p=augmentation_probabilities.get("PitchShift", 0.0),
                     min_semitones=-3,
                     max_semitones=3,
                 ),
                 audiomentations.BandStopFilter(
-                    p=augmentation_probabilities.get("BandStopFilter", 0.25),
+                    p=augmentation_probabilities.get("BandStopFilter", 0.0),
                 ),
                 audiomentations.AddColorNoise(
-                    p=augmentation_probabilities.get("AddColorNoise", 0.25),
+                    p=augmentation_probabilities.get("AddColorNoise", 0.0),
                     min_snr_db=10,
                     max_snr_db=30,
                 ),
                 background_noise_augment,
                 audiomentations.GainTransition(
-                    p=augmentation_probabilities.get("Gain", 1.0),
+                    p=augmentation_probabilities.get("Gain", 0.0),
                     min_gain_db=-12,
                     max_gain_in_db=0,
                 ),
@@ -165,12 +187,16 @@ class Augmentation:
     def add_jitter(self, input_audio):
         if self.min_jitter_samples < self.max_jitter_samples:
             jitter_samples = np.random.randint(self.min_jitter_samples, self.max_jitter_samples)
+        elif self.max_start_time_from_right_s is not None:
+            max_start_from_right_samples = int(self.max_start_time_from_right_s*16000)
+            max_padding_samples = max_start_from_right_samples - input_audio.shape[0]
+            jitter_samples = np.random.randint(0, max_padding_samples)
         else:
             jitter_samples = self.min_jitter_samples
             
         # Pad audio on the right by jitter samples
         return np.pad(input_audio, (0,jitter_samples))
-    
+        
     def create_fixed_size_clip(self, input_audio):
         if self.augmented_samples is not None:
             if self.augmented_samples < input_audio.shape[0]:
@@ -194,6 +220,7 @@ class Augmentation:
             (ndarray): the augmented audio with sample rate 16 kHz and 16-bit samples
         """
         input_audio = self.add_jitter(input_audio)
+        # input_audio = self.offset_from_right(input_audio)
         input_audio = self.create_fixed_size_clip(input_audio)
         
         with warnings.catch_warnings():
@@ -201,7 +228,6 @@ class Augmentation:
             output_audio = self.augment(input_audio, sample_rate=16000)
             
         return output_audio
-        # return (output_audio * 32767).astype(np.int16)
     
     def augment_generator(self, audio_generator):
         for audio in audio_generator:
@@ -214,8 +240,8 @@ class Clips:
         input_glob,
         min_clip_duration_s=0,
         max_clip_duration_s=math.inf,
-        repeat_clip_min_duration_s=0,        
-        remove_silence=False,
+        # repeat_clip_min_duration_s=0,        
+        # remove_silence=False,
         random_split_seed=None,
         split_count=200,  
         **kwargs,
@@ -228,11 +254,11 @@ class Clips:
         if max_clip_duration_s is None:
             self.max_clip_duration_s = math.inf
         
-        self.repeat_clip_min_duration_s = repeat_clip_min_duration_s
-        if repeat_clip_min_duration_s is None:
-            self.repeat_clip_min_duration_s = repeat_clip_min_duration_s
+        # self.repeat_clip_min_duration_s = repeat_clip_min_duration_s
+        # if repeat_clip_min_duration_s is None:
+        #     self.repeat_clip_min_duration_s = repeat_clip_min_duration_s
         
-        self.remove_silence=remove_silence
+        # self.remove_silence=remove_silence
         
         paths_to_clips = [str(i) for i in Path(input_path).glob(input_glob)]        
         
