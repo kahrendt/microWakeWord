@@ -25,6 +25,7 @@ import microwakeword.test as test
 import microwakeword.utils as utils
 
 import microwakeword.inception as inception
+import microwakeword.mixednet as mixednet
 
 from microwakeword.layers import modes
 
@@ -340,18 +341,24 @@ if __name__ == "__main__":
     # inception model settings
     parser_inception = subparsers.add_parser("inception")
     inception.model_parameters(parser_inception)
+    
+    # mixednet model settings
+    parser_mixednet = subparsers.add_parser("mixednet")
+    mixednet.model_parameters(parser_mixednet)
 
     flags, unparsed = parser.parse_known_args()
     if unparsed:
         raise ValueError("Unknown argument: {}".format(unparsed))
 
-    logging.set_verbosity(flags.verbosity)
-
     if flags.model_name == "inception":
         model_module = inception
+    elif flags.model_name == "mixednet":
+        model_module = mixednet
     else:
         raise ValueError("Unknown model type: {}".format(flags.model_name))
 
+    logging.set_verbosity(flags.verbosity)
+    
     config = load_config(flags, model_module)
 
     data_processor = input_data.FeatureHandler(config)
