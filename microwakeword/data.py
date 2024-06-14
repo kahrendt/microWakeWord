@@ -282,8 +282,8 @@ class MmapFeatureGenerator(object):
 
             if truncation_strategy == "split":
                 for feature_start_index in range(
-                    0, spectrogram.shape[0] - features_length, 10 * 2
-                ):  # 20 features corresponds to 200 ms
+                    0, spectrogram.shape[0] - features_length, 10
+                ):  # 10 features corresponds to 200 ms
                     split_spectrogram = spectrogram[
                         feature_start_index : feature_start_index + features_length
                     ]
