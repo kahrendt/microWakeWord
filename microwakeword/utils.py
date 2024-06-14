@@ -19,6 +19,8 @@ import os.path
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.python.keras.models import _clone_layers_and_model_config, _clone_layer
+
 from absl import logging
 from typing import Sequence
 
@@ -36,7 +38,7 @@ def _set_mode(model, mode):
         # for every layer set mode, if it has it
         if "mode" in config:
             layer.mode = mode
-            # with any mode of inference - training is False
+        # with any mode of inference - training is False
         if "training" in config:
             layer.training = False
         if mode == modes.Modes.NON_STREAM_INFERENCE:
@@ -46,23 +48,6 @@ def _set_mode(model, mode):
     for layer in model.layers:
         _recursive_set_layer_mode(layer, mode)
     return model
-
-
-def _get_input_output_states(model):
-    """Get input/output states of model with external states."""
-    input_states = []
-    output_states = []
-    for i in range(len(model.layers)):
-        config = model.layers[i].get_config()
-        # input output states exist only in layers with property 'mode'
-        if "mode" in config:
-            input_state = model.layers[i].get_input_state()
-            if input_state not in ([], [None]):
-                input_states.append(model.layers[i].get_input_state())
-            output_state = model.layers[i].get_output_state()
-            if output_state not in ([], [None]):
-                output_states.append(output_state)
-    return input_states, output_states
 
 
 def _copy_weights(new_model, model):
@@ -142,21 +127,6 @@ def _copy_weights(new_model, model):
     return new_model
 
 
-def _flatten_nested_sequence(sequence):
-    """Returns a flattened list of sequence's elements."""
-    if not isinstance(sequence, Sequence):
-        return [sequence]
-    result = []
-    for value in sequence:
-        result.extend(_flatten_nested_sequence(value))
-    return result
-
-
-def _get_state_shapes(model_states):
-    """Converts a nested list of states in to a flat list of their shapes."""
-    return [state.shape for state in _flatten_nested_sequence(model_states)]
-
-
 def save_model_summary(model, path, file_name="model_summary.txt"):
     """Saves model topology/summary in text format.
 
@@ -197,6 +167,7 @@ def convert_to_inference_model(model, input_tensors, mode):
 
     # scope is introduced for simplifiyng access to weights by names
     scope_name = "streaming"
+
     with tf.name_scope(scope_name):
         if not isinstance(model, tf.keras.Model):
             raise ValueError(
@@ -218,25 +189,10 @@ def convert_to_inference_model(model, input_tensors, mode):
             )
         # pylint: enable=protected-access
         model = _set_mode(model, mode)
-        new_model = tf.keras.models.clone_model(
-            model, input_tensors
-        )  # _clone_model(model, input_tensors)
+        new_model = tf.keras.models.clone_model(model, input_tensors)
 
     if mode == modes.Modes.STREAM_INTERNAL_STATE_INFERENCE:
         return _copy_weights(new_model, model)
-    elif mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
-        input_states, output_states = _get_input_output_states(new_model)
-        all_inputs = new_model.inputs + input_states
-        all_outputs = new_model.outputs + output_states
-        new_streaming_model = tf.keras.Model(all_inputs, all_outputs)
-        new_streaming_model.input_shapes = _get_state_shapes(all_inputs)
-        new_streaming_model.output_shapes = _get_state_shapes(all_outputs)
-
-        # inference streaming model with external states
-        # has the same number of weights with
-        # non streaming model so we can use set_weights directly
-        new_streaming_model.set_weights(model.get_weights())
-        return new_streaming_model
     elif mode == modes.Modes.NON_STREAM_INFERENCE:
         new_model.set_weights(model.get_weights())
         return new_model
@@ -250,8 +206,8 @@ def to_streaming_inference(model_non_stream, config, mode):
     Args:
       model_non_stream: trained Keras model non streamable
       config: dictionary containing microWakeWord training configuration
-      mode: it supports Non streaming inference, Streaming inference with internal
-        states, Streaming inference with external states
+      mode: it supports Non streaming inference or Streaming inference with internal
+        states
 
     Returns:
       Keras inference model of inference_type
@@ -309,7 +265,7 @@ def model_to_saved(
       model_non_stream: Keras non streamable model
       config: dictionary containing microWakeWord training configuration
       save_model_path: path where saved model representation with be stored
-      mode: inference mode it can be streaming with external state or non
+      mode: inference mode it can be streaming with internal state or non
         streaming
     """
 
@@ -345,17 +301,22 @@ def convert_saved_model_to_tflite(
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    sample_fingerprints, _, _ = audio_processor.get_data(
-        "training", 500, features_length=config["spectrogram_length"]
-    )
-
-    sample_fingerprints[0][0, 0] = 0.0  # guarantee one pixel is the preprocessor min
-    sample_fingerprints[0][0, 1] = 26.0  # guarantee one pixel is the preprocessor max
-
     def representative_dataset_gen():
+        sample_fingerprints, _, _ = audio_processor.get_data(
+            "training", 500, features_length=config["spectrogram_length"]
+        )
+
+        sample_fingerprints[0][
+            0, 0
+        ] = 0.0  # guarantee one pixel is the preprocessor min
+        sample_fingerprints[0][
+            0, 1
+        ] = 26.0  # guarantee one pixel is the preprocessor max
+        stride = config["flags"].get("stride", 1)
         for spectrogram in sample_fingerprints:
-            for i in range(spectrogram.shape[0]):
-                yield [spectrogram[i, :].astype(np.float32)]
+            for i in range(0, spectrogram.shape[0] - 1, 2):
+                sample = spectrogram[i : i + stride, :].astype(np.float32)
+                yield [spectrogram[i : i + stride, :].astype(np.float32)]
 
     converter = tf.compat.v2.lite.TFLiteConverter.from_saved_model(path_to_model)
     converter.experimental_new_quantizer = True
