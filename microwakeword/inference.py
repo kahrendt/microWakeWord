@@ -19,7 +19,7 @@
 # imports
 import numpy as np
 import tensorflow as tf
-from microwakeword.feature_generation import generate_features_for_clip
+from microwakeword.audio.audio_utils import generate_features_for_clip
 
 
 class Model:
@@ -30,7 +30,7 @@ class Model:
         tflite_model_path (str): path to tflite model file
     """
 
-    def __init__(self, tflite_model_path):
+    def __init__(self, tflite_model_path: str):
         # Load tflite model
         interpreter = tf.lite.Interpreter(
             model_path=tflite_model_path,
@@ -57,42 +57,47 @@ class Model:
 
         self.model = interpreter
 
-    def predict_clip(self, data):
+    def predict_clip(self, data: np.ndarray, step_ms: int = 20):
         """Run the model on a single clip of audio data
 
         Args:
             data (np.ndarray): input data for the model (16 khz, 16-bit PCM audio data)
+            step_ms (int): The window step sized used for generating the spectrogram in ms. Defaults to 20.
 
         Returns:
             list: model predictions for the input audio data
         """
 
         # Get the spectrogram
-        spec = generate_features_for_clip(data)
+        spectrogram = generate_features_for_clip(data, stride_ms=step_ms)
 
-        return self.predict_spectrogram(spec)
+        return self.predict_spectrogram(spectrogram)
 
-    def predict_spectrogram(self, spec):
+    def predict_spectrogram(self, spectrogram: np.ndarray):
         """Run the model on a single clip of audio data
 
         Args:
-            spec (np.ndarray): input spectrogram
+            spectrogram (np.ndarray): input spectrogram
 
         Returns:
             list: model predictions for the input audio data
         """
 
+        # Spectrograms with type np.uint16 haven't been scaled
+        if np.issubdtype(spectrogram.dtype, np.uint16):
+            spectrogram = spectrogram.astype(np.float32) * 0.0390625
+
         # Slice the input data into the required number of chunks
         chunks = []
-        for i in range(0, len(spec), self.input_feature_slices):
-            chunk = spec[i : i + self.input_feature_slices]
+        for i in range(0, len(spectrogram), self.input_feature_slices):
+            chunk = spectrogram[i : i + self.input_feature_slices]
             if len(chunk) == self.input_feature_slices:
                 chunks.append(chunk)
 
         # Get the prediction for each chunk
         predictions = []
         for chunk in chunks:
-            if self.is_quantized_model:
+            if self.is_quantized_model and spectrogram.dtype != np.int8:
                 chunk = self.quantize_input_data(chunk, self.input_details[0])
 
             self.model.set_tensor(
@@ -109,15 +114,15 @@ class Model:
 
         return predictions
 
-    def quantize_input_data(self, data, input_details) -> np.ndarray:
+    def quantize_input_data(self, data: np.ndarray, input_details: dict) -> np.ndarray:
         """quantize the input data using scale and zero point
 
         Args:
-            data (np.array in float): input data for the interpreter
-            input_details : output of get_input_details from the tflm interpreter.
+            data (numpy.array in float): input data for the interpreter
+            input_details (dict): output of get_input_details from the tflm interpreter.
 
         Returns:
-          np.ndarray: quantized data as int8 dtype
+          numpy.ndarray: quantized data as int8 dtype
         """
         # Get input quantization parameters
         data_type = input_details["dtype"]
@@ -137,11 +142,11 @@ class Model:
         """Dequantize the model output
 
         Args:
-            data: integer data to be dequantized
-            output_details: TFLM interpreter model output details
+            data (numpy.ndarray): integer data to be dequantized
+            output_details (dict): TFLM interpreter model output details
 
         Returns:
-            np.ndarray: dequantized data as float32 dtype
+            numpy.ndarray: dequantized data as float32 dtype
         """
         output_quantization_parameters = output_details["quantization_parameters"]
         output_scale = output_quantization_parameters["scales"][0]
