@@ -22,8 +22,7 @@ import numpy as np
 import tensorflow as tf
 
 from absl import logging
-from typing import list
-
+from typing import List
 from microwakeword.inference import Model
 
 
@@ -92,7 +91,7 @@ def metrics_to_string(metrics):
 
 
 def compute_false_accepts_per_hour(
-    streaming_probabilities_list: list[np.ndarray],
+    streaming_probabilities_list: List[np.ndarray],
     cutoffs: np.array,
     ignore_slices_after_accept: int = 75,
     step_s: float = 0.02,
