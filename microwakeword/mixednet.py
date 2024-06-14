@@ -248,7 +248,6 @@ def model(flags, shape, batch_size):
 
     It is based on the paper
     MixConv: Mixed Depthwise Convolutional Kernels
-    MatchboxNet model.
     https://arxiv.org/abs/1907.09595
     Args:
       flags: data/model parameters
