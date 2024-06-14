@@ -25,77 +25,17 @@ from absl import logging
 from pathlib import Path
 from mmap_ninja.ragged import RaggedMmap
 
-
-def mixup_augment(
-    spectrogram_1, truth_1, weight_1, spectrogram_2, truth_2, weight_2, mix_ratio
-):
-    """Applies MixUp augment to the input spectrograms.
-    Based on mixup: BEYOND EMPIRICAL RISK MINIMIZATION by H. Zhang, M. Cisse, Y. Dauphin, D. Lopez-Paz
-    https://openreview.net/pdf?id=r1Ddp1-Rb
-
-    Args:
-        spectrogram_1: the first spectrogram.
-        truth_1: the ground truth of the first spectrogram
-        weight_1: the penalty weight of the first spectrogram
-        spectrogram_2: the second spectrogram
-        truth_2: the ground truth of the second spectrogram
-        weight_2: the penalty weight of the second spectrogram
-
-    Returns:
-        spectrogram: the blended spectrogram
-        truth: the blended ground truth
-        weight: the blended penalty weight
-    """
-
-    combined_spectrogram = spectrogram_1 * mix_ratio + spectrogram_2 * (1 - mix_ratio)
-    combined_truth = float(truth_1) * mix_ratio + float(truth_2) * (1 - mix_ratio)
-    combined_weight = weight_1 * mix_ratio + weight_2 * (1 - mix_ratio)
-
-    return combined_spectrogram, combined_truth, combined_weight
-
-
-def freqmix_augment(
-    spectrogram_1, truth_1, weight_1, spectrogram_2, truth_2, weight_2, mix_ratio
-):
-    """Applies FreqMix augment to the input spectrograms.
-    Based on END-TO-END AUDIO STRIKES BACK: BOOSTING AUGMENTATIONS TOWARDS AN EFFICIENT AUDIO CLASSIFICATION NETWORK by A. Gazneli, G. Zimerman, T. Ridnik, G. Sharir, A. Noy
-    https://arxiv.org/pdf/2204.11479v5.pdf
-
-    Args:
-        spectrogram_1: the first spectrogram
-        truth_1: the ground truth of the first spectrogram
-        weight_1: the penalty weight of the first spectrogram
-        spectrogram_2: the second spectrogram
-        truth_2: the ground truth of the second spectrogram
-        weight_2: the penalty weight of the second spectrogram
-
-    Returns:
-        spectrogram: the blended spectrogram
-        truth: the blended ground truth
-        weight: the blended penalty weight
-    """
-
-    freq_bin_cutoff = int(mix_ratio * 40)
-
-    combined_spectrogram = np.concatenate(
-        (spectrogram_1[:, :freq_bin_cutoff], spectrogram_2[:, freq_bin_cutoff:]), axis=1
-    )
-    combined_truth = float(truth_1) * (freq_bin_cutoff / 40.0) + float(truth_2) * (
-        1 - freq_bin_cutoff / 40.0
-    )
-    combined_weight = weight_1 * (freq_bin_cutoff / 40.0) + weight_2 * (
-        1 - freq_bin_cutoff / 40.0
-    )
-
-    return combined_spectrogram, combined_truth, combined_weight
+from microwakeword.audio.clips import Clips
+from microwakeword.audio.augmentation import Augmentation
+from microwakeword.audio.spectrograms import SpectrogramGeneration
 
 
 def spec_augment(
-    spectrogram,
-    time_mask_max_size=0,
-    time_mask_count=1,
-    freq_mask_max_size=0,
-    freq_mask_count=1,
+    spectrogram: np.ndarray,
+    time_mask_max_size: int = 0,
+    time_mask_count: int = 0,
+    freq_mask_max_size: int = 0,
+    freq_mask_count: int = 0,
 ):
     """Applies SpecAugment to the input spectrogram.
     Based on SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition by D. Park, W. Chan, Y. Zhang, C. Chiu, B. Zoph, E Cubuk, Q Le
@@ -103,41 +43,44 @@ def spec_augment(
     Implementation based on https://github.com/pyyush/SpecAugment/tree/master
 
     Args:
-        spectrogram: the input spectrogram
-        time_mask_max_size: maximum size of time feature masks
-        time_mask_count: the total number of separate time masks
-        freq_mask_max_size: maximum size of frequency feature masks
-        time_mask_count: the total number of separate feature masks
+        spectrogram (numpy.ndarray): The input spectrogram.
+        time_mask_max_size (int): The maximum size of time feature masks. Defaults to 0.
+        time_mask_count (int): The total number of separate time masks. Defaults to 0.
+        freq_mask_max_size (int): The maximum size of frequency feature masks. Defaults to 0.
+        time_mask_count (int): The total number of separate feature masks. Defaults to 0.
 
     Returns:
-        masked spectrogram
+        numpy.ndarray: The masked spectrogram.
     """
 
-    freq_bins = spectrogram.shape[0]
-    time_frames = spectrogram.shape[1]
+    time_frames = spectrogram.shape[0]
+    freq_bins = spectrogram.shape[1]
 
-    for i in range(freq_mask_count):
-        f = int(np.random.uniform(0, freq_mask_max_size))
-        f0 = random.randint(0, freq_bins - f)
-        spectrogram[f0 : f0 + f, :] = 0
+    # Spectrograms yielded from a generator are read only
+    augmented_spectrogram = np.copy(spectrogram)
 
     for i in range(time_mask_count):
         t = int(np.random.uniform(0, time_mask_max_size))
         t0 = random.randint(0, time_frames - t)
-        spectrogram[:, t0 : t0 + t] = 0
+        augmented_spectrogram[t0 : t0 + t, :] = 0
 
-    return spectrogram
+    for i in range(freq_mask_count):
+        f = int(np.random.uniform(0, freq_mask_max_size))
+        f0 = random.randint(0, freq_bins - f)
+        augmented_spectrogram[:, f0 : f0 + f] = 0
+
+    return augmented_spectrogram
 
 
 def fixed_length_spectrogram(
-    spectrogram, features_length, truncation_strategy="random"
+    spectrogram: np.ndarray, features_length: int, truncation_strategy: str = "random"
 ):
-    """Returns a spectrogram with specified length. Pads with zeros at the start if too short.
+    """Returns a spectrogram with specified length. Pads with zeros at the start if too short. Removes feature windows following ``truncation_strategy`` if too long.
 
     Args:
-        spectrogram: the spectrogram to truncate or pad
-        features_length: the desired spectrogram length
-        truncation_strategy: how to truncate if ``spectrogram`` is longer than ``features_length`` One of:
+        spectrogram (numpy.ndarray): The spectrogram to truncate or pad.
+        features_length (int): The desired spectrogram length.
+        truncation_strategy (str): How to truncate if ``spectrogram`` is longer than ``features_length`` One of:
             random: choose a random portion of the entire spectrogram - useful for long negative samples
             truncate_start: remove the start of the spectrogram
             truncate_end: remove the end of the spectrogram
@@ -145,7 +88,7 @@ def fixed_length_spectrogram(
 
 
     Returns:
-        fixed length spectrogram after truncating or padding
+        numpy.ndarry: The fixed length spectrogram due to padding or truncation.
     """
     data_length = spectrogram.shape[0]
     features_offset = 0
@@ -154,13 +97,11 @@ def fixed_length_spectrogram(
             features_offset = np.random.randint(0, data_length - features_length)
         elif truncation_strategy == "none":
             # return the entire spectrogram
-            features_offset = 0
             features_length = data_length
         elif truncation_strategy == "truncate_start":
             features_offset = data_length - features_length
         elif truncation_strategy == "truncate_end":
             features_offset = 0
-
     else:
         pad_slices = features_length - data_length
 
@@ -172,64 +113,45 @@ def fixed_length_spectrogram(
     return spectrogram[features_offset : (features_offset + features_length)]
 
 
-class FeatureHandler(object):
-    """Class that handles loading spectrogram features and providing them to the training and testing functions.
+class MmapFeatureGenerator(object):
+    """A class that handles loading spectrograms from Ragged MMaps for training or testing.
 
     Args:
-      config: dictionary containing microWakeWord training configuration
+        path (str): Input directory to the Ragged MMaps. The Ragged MMap folders should be included in the following file structure:
+            training/ (spectrograms to use for training the model)
+            validation/ (spectrograms used to validate the model while training)
+            testing/ (spectrograms used to test the model after training)
+            validation_ambient/ (spectrograms of long duration background audio clips that are split and validated while training)
+            testing_ambient/ (spectrograms of long duration background audio clips to test the model after training)
+        label (bool): The class each spectrogram represents; i.e., wakeword or not.
+        sampling_weight (float): The sampling weight for how frequently a spectrogram from this dataset is chosen.
+        penalty_weight (float): The penalizing weight for incorrect predictions for each spectrogram.
+        truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
     """
 
     def __init__(
         self,
-        config,
+        path: str,
+        label: bool,
+        sampling_weight: float,
+        penalty_weight: float,
+        truncation_strategy: str,
     ):
-        self.features = []
+        self.label = float(label)
+        self.sampling_weight = sampling_weight
+        self.penalty_weight = penalty_weight
+        self.truncation_strategy = truncation_strategy
 
-        logging.info("Loading and analyzing data sets.")
+        self.stats = {}
+        self.feature_sets = {}
 
-        features = copy.deepcopy(config["features"])
+        self.feature_sets["testing"] = []
+        self.feature_sets["training"] = []
+        self.feature_sets["validation"] = []
+        self.feature_sets["validation_ambient"] = []
+        self.feature_sets["testing_ambient"] = []
 
-        for feature_set in features:
-            feature_set["testing"] = []
-            feature_set["training"] = []
-            feature_set["validation"] = []
-            feature_set["validation_ambient"] = []
-            feature_set["testing_ambient"] = []
-            feature_set["loaded_features"] = []
-            feature_set["stats"] = {}
-
-            self.prepare_data(feature_set)
-            self.features.append(feature_set)
-
-        modes = [
-            "training",
-            "validation",
-            "validation_ambient",
-            "testing",
-            "testing_ambient",
-        ]
-
-        for mode in modes:
-            logging.info(
-                "%s mode has %d spectrograms representing %.1f hours of audio",
-                *(mode, self.get_mode_size(mode), self.get_mode_duration(mode) / 3600.0)
-            )
-
-    def prepare_data(self, feature_dict):
-        """Loads data from a feature's config entry.
-
-        Args:
-            feature_dict: dictionary with keys for:
-                features_dir: directory containing diffferent mode folders
-                sampling_weight: weight for choosing a spectrogram from this set in the batch
-                penalty_weight: penalizing weight for incorrect predictions from this set
-                truth: boolean representing whether this set has positive samples or negative samples
-                truncation_strategy: if a spectrogram is longer than necessary for training, how is it truncated
-        """
-        data_dir = feature_dict["features_dir"]
-
-        if not os.path.exists(data_dir):
-            print("ERROR:" + str(data_dir) + "directory doesn't exist")
+        self.loaded_features = []
 
         dirs = [
             "testing",
@@ -243,7 +165,7 @@ class FeatureHandler(object):
             duration = 0.0
             count = 0
 
-            search_path_directory = os.path.join(data_dir, set_index)
+            search_path_directory = os.path.join(path, set_index)
             search_path = [
                 str(i)
                 for i in Path(os.path.abspath(search_path_directory)).glob("**/*_mmap/")
@@ -252,11 +174,11 @@ class FeatureHandler(object):
             for mmap_path in search_path:
                 imported_features = RaggedMmap(mmap_path)
 
-                feature_dict["loaded_features"].append(imported_features)
-                feature_index = len(feature_dict["loaded_features"]) - 1
+                self.loaded_features.append(imported_features)
+                feature_index = len(self.loaded_features) - 1
 
                 for i in range(0, len(imported_features)):
-                    feature_dict[set_index].append(
+                    self.feature_sets[set_index].append(
                         {
                             "loaded_feature_index": feature_index,
                             "subindex": i,
@@ -265,70 +187,291 @@ class FeatureHandler(object):
 
                     duration += (
                         0.02 * imported_features[i].shape[0]
-                    )  # Each feature represents 0.02 seconds of audio
+                    )  # Each feature represents 0.02 seconds of audio TODO: If we use a different window step size, this is incorrect!
                     count += 1
 
-            random.shuffle(feature_dict[set_index])
+            random.shuffle(self.feature_sets[set_index])
 
-            feature_dict["stats"][set_index] = {
+            self.stats[set_index] = {
                 "spectrogram_count": count,
                 "total_duration": duration,
             }
 
+    def get_mode_duration(self, mode: str):
+        """Retrieves the total duration of the spectrograms in the mode set.
+
+        Args:
+            mode (str): Specifies the set. One of "training", "validation", "testing", "validation_ambient", "testing_ambient".
+
+        Returns:
+            float: The duration in hours.
+        """
+        return self.stats[mode]["total_duration"]
+
+    def get_mode_size(self, mode):
+        """Retrieves the total count of the spectrograms in the mode set.
+
+        Args:
+            mode (str): Specifies the set. One of "training", "validation", "testing", "validation_ambient", "testing_ambient".
+
+        Returns:
+            int: The spectrogram count.
+        """
+        return self.stats[mode]["spectrogram_count"]
+
+    def get_random_spectrogram(
+        self, mode: str, features_length: int, truncation_strategy: str
+    ):
+        """Retrieves a random spectrogram from the specified mode with specified length after truncation.
+
+        Args:
+            mode (str): Specifies the set. One of "training", "validation", "testing", "validation_ambient", "testing_ambient".
+            features_length (int): The length of the spectrogram in feature windows.
+            truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+
+        Returns:
+            numpy.ndarray: A random spectrogram of specified length after truncation.
+        """
+        if truncation_strategy == "default":
+            truncation_strategy = self.truncation_strategy
+
+        feature = random.choice(self.feature_sets[mode])
+        spectrogram = self.loaded_features[feature["loaded_feature_index"]][
+            feature["subindex"]
+        ]
+
+        spectrogram = fixed_length_spectrogram(
+            spectrogram,
+            features_length,
+            truncation_strategy,
+        )
+
+        # Spectrograms with type np.uint16 haven't been scaled
+        if np.issubdtype(spectrogram.dtype, np.uint16):
+            spectrogram = spectrogram.astype(np.float32) * 0.0390625
+
+        return spectrogram
+
+    def get_feature_generator(
+        self,
+        mode,
+        features_length,
+        truncation_strategy="default",
+    ):
+        """A Python generator that yields spectrograms from the specified mode of specified length after truncation.
+
+        Args:
+            mode (str): Specifies the set. One of "training", "validation", "testing", "validation_ambient", "testing_ambient".
+            features_length (int): The length of the spectrogram in feature windows.
+            truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+
+        Yields:
+            numpy.ndarray: A random spectrogram of specified length after truncation.
+        """
+        if truncation_strategy == "default":
+            truncation_strategy = self.truncation_strategy
+
+        for feature in self.feature_sets[mode]:
+            spectrogram = self.loaded_features[feature["loaded_feature_index"]][
+                feature["subindex"]
+            ]
+
+            # Spectrograms with type np.uint16 haven't been scaled
+            if np.issubdtype(spectrogram.dtype, np.uint16):
+                spectrogram = spectrogram.astype(np.float32) * 0.0390625
+
+            if truncation_strategy == "split":
+                for feature_start_index in range(
+                    0, spectrogram.shape[0] - features_length, 10 * 2
+                ):  # 20 features corresponds to 200 ms
+                    split_spectrogram = spectrogram[
+                        feature_start_index : feature_start_index + features_length
+                    ]
+
+                    yield split_spectrogram
+            else:
+                spectrogram = fixed_length_spectrogram(
+                    spectrogram,
+                    features_length,
+                    truncation_strategy,
+                )
+
+                yield spectrogram
+
+
+class ClipsHandlerWrapperGenerator(object):
+    """A class that handles loading spectrograms from audio files on the disk to use while training. This generates spectrograms with random augmentations applied during the training process.
+
+    Args:
+        spectrogram_generation (SpectrogramGeneration): Object that handles generating spectrograms from audio files.
+        label (bool): The class each spectrogram represents; i.e., wakeword or not.
+        sampling_weight (float): The sampling weight for how frequently a spectrogram from this dataset is chosen.
+        penalty_weight (float): The penalizing weight for incorrect predictions for each spectrogram.
+        truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+    """
+
+    def __init__(
+        self,
+        spectrogram_generation: SpectrogramGeneration,
+        label: bool,
+        sampling_weight: float,
+        penalty_weight: float,
+        truncation_strategy: str,
+    ):
+        self.spectrogram_generation = spectrogram_generation
+        self.label = label
+        self.sampling_weight = sampling_weight
+        self.penalty_weight = penalty_weight
+        self.truncation_strategy = truncation_strategy
+
+        self.augmented_generator = self.spectrogram_generation.spectrogram_generator(
+            random=True
+        )
+
     def get_mode_duration(self, mode):
+        """Function to maintain compatability with the MmapFeatureGenerator class."""
+        return 0.0
+
+    def get_mode_size(self, mode):
+        """Function to maintain compatability with the MmapFeatureGenerator class. This class is intended only for retrieving spectrograms for training."""
+        if mode == "training":
+            return len(self.spectrogram_generation.clips.clips)
+        else:
+            return 0
+
+    def get_random_spectrogram(self, mode, features_length, truncation_strategy):
+        """Retrieves a random spectrogram from the specified mode with specified length after truncation.
+
+        Args:
+            mode (str): Specifies the set, but is ignored for this class. It is assumed the spectrograms will be for training.
+            features_length (int): The length of the spectrogram in feature windows.
+            truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+
+        Returns:
+            numpy.ndarray: A random spectrogram of specified length after truncation.
+        """
+
+        if truncation_strategy == "default":
+            truncation_strategy = self.truncation_strategy
+
+        spectrogram = next(self.augmented_generator)
+
+        spectrogram = fixed_length_spectrogram(
+            spectrogram,
+            features_length,
+            truncation_strategy,
+        )
+
+        # Spectrograms with type np.uint16 haven't been scaled
+        if np.issubdtype(spectrogram.dtype, np.uint16):
+            spectrogram = spectrogram.astype(np.float32) * 0.0390625
+
+        return spectrogram
+
+    def get_feature_generator(
+        self,
+        mode,
+        features_length,
+        truncation_strategy="default",
+    ):
+        """Function to maintain compatability with the MmapFeatureGenerator class."""
+        for x in []:
+            yield x
+
+
+class FeatureHandler(object):
+    """Class that handles loading spectrogram features and providing them to the training and testing functions.
+
+    Args:
+      config: dictionary containing microWakeWord training configuration
+    """
+
+    def __init__(
+        self,
+        config: dict,
+    ):
+        self.feature_providers = []
+
+        logging.info("Loading and analyzing data sets.")
+
+        for feature_set in config["features"]:
+            if feature_set["type"] == "mmap":
+                self.feature_providers.append(
+                    MmapFeatureGenerator(
+                        feature_set["features_dir"],
+                        feature_set["truth"],
+                        feature_set["sampling_weight"],
+                        feature_set["penalty_weight"],
+                        feature_set["truncation_strategy"],
+                    )
+                )
+            elif feature_set["type"] == "clips":
+                clips_handler = Clips(**feature_set)
+                augmentation_applier = Augmentation(**feature_set)
+                spectrogram_generator = SpectrogramGeneration(
+                    clips_handler, augmentation_applier, **feature_set
+                )
+                self.feature_providers.append(
+                    ClipsHandlerWrapperGenerator(
+                        spectrogram_generator,
+                        feature_set["truth"],
+                        feature_set["sampling_weight"],
+                        feature_set["penalty_weight"],
+                        feature_set["truncation_strategy"],
+                    )
+                )
+
+    def get_mode_duration(self, mode: str):
         """Returns the durations of all spectrogram features in the given mode.
 
         Args:
-            mode: which training set to compute duration over. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+            mode (str): which training set to compute duration over. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
 
         Returns:
             duration, in seconds, of all spectrograms in this mode
         """
 
         sample_duration = 0
-        for feature_set in self.features:
-            # sample_count += len(feature_set[mode])
-            sample_duration += feature_set["stats"][mode]["total_duration"]
+        for provider in self.feature_providers:
+            sample_duration += provider.get_mode_duration(mode)
         return sample_duration
 
-    def get_mode_size(self, mode):
+    def get_mode_size(self, mode: str):
         """Returns the count of all spectrogram features in the given mode.
 
         Args:
-            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+            mode (str): which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
 
         Returns:
             count of spectrograms in given mode
         """
         sample_count = 0
-        for feature_set in self.features:
-            sample_count += feature_set["stats"][mode]["spectrogram_count"]
+        for provider in self.feature_providers:
+            sample_count += provider.get_mode_size(mode)
         return sample_count
 
     def get_data(
         self,
-        mode,
-        batch_size,
-        features_length,
-        truncation_strategy="default",
-        augmentation_policy={
-            "mix_up_prob": 0.0,
+        mode: str,
+        batch_size: int,
+        features_length: int,
+        truncation_strategy: str = "default",
+        augmentation_policy: dict = {
             "freq_mix_prob": 0.0,
-            "time_mask_max_size": 10,
-            "time_mask_count": 1,
-            "freq_mask_max_size": 1,
-            "freq_mask_count": 3,
+            "time_mask_max_size": 0,
+            "time_mask_count": 0,
+            "freq_mask_max_size": 0,
+            "freq_mask_count": 0,
         },
     ):
         """Gets spectrograms from the appropriate mode. Ensures spectrograms are the approriate length and optionally applies augmentation.
 
         Args:
-            mode: which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
-            batch_size: number of spectrograms in the sample for training mode
-            features_length: the length of the spectrograms
-            truncation_strategy: how to truncate spectrograms longer than `features_length`
-            augmentation_policy: dictionary that specifies augmentation settings. It has the following keys:
-                mix_up_prob: probability that MixUp is applied
+            mode (str): which training set to count the spectrograms. One of `training`, `testing`, `testing_ambient`, `validation`, or `validation_ambient`
+            batch_size (int): number of spectrograms in the sample for training mode
+            features_length (int): the length of the spectrograms
+            truncation_strategy (str): how to truncate spectrograms longer than `features_length`
+            augmentation_policy (dict): dictionary that specifies augmentation settings. It has the following keys:
                 freq_mix_prob: probability that FreqMix is applied
                 time_mask_max_size: maximum size of time feature masks for SpecAugment
                 time_mask_count: the total number of separate time masks applied for SpecAugment
@@ -341,216 +484,70 @@ class FeatureHandler(object):
             weights: penalizing weight for incorrect predictions for each spectrogram
         """
 
-        combination_augments = (augmentation_policy["mix_up_prob"] > 0) or (
-            augmentation_policy["freq_mix_prob"] > 0
-        )
-
         if mode == "training":
             sample_count = batch_size
         elif (mode == "validation") or (mode == "testing"):
             sample_count = self.get_mode_size(mode)
-        else:
-            sample_count = 0
-            for feature_set in self.features:
-                features_in_this_mode = feature_set[mode]
 
-                if len(features_in_this_mode) > 0:
-                    if truncation_strategy != "none":
-                        for features in features_in_this_mode:
-                            spectrogram = feature_set["loaded_features"][
-                                features["loaded_feature_index"]
-                            ][features["subindex"]]
-                            sample_count += (
-                                spectrogram.shape[0] - features_length
-                            ) // 10 + 1
-                    else:
-                        sample_count += len(features_in_this_mode)
-
-        spectrogram_shape = (features_length, 40)
-
-        data = np.zeros((sample_count,) + spectrogram_shape)
-        labels = np.full(sample_count, 0.0)
-        weights = np.ones(sample_count)
-
-        if mode.endswith("ambient") and truncation_strategy == "none":
-            # Use a list instead of a numpy array; ambient set's spectrograms may have different lengths
-            data = []
+        data = []
+        labels = []
+        weights = []
 
         if mode == "training":
-            random_feature_sets = random.choices(
+            random_feature_providers = random.choices(
                 [
-                    feature_set
-                    for feature_set in self.features
-                    if len(feature_set["training"])
+                    provider
+                    for provider in self.feature_providers
+                    if provider.get_mode_size("training")
                 ],
                 [
-                    feature_set["sampling_weight"]
-                    for feature_set in self.features
-                    if len(feature_set["training"])
-                ],
-                k=sample_count,
-            )
-            random_feature_sets2 = random.choices(
-                [
-                    feature_set
-                    for feature_set in self.features
-                    if len(feature_set["training"])
-                ],
-                [
-                    feature_set["sampling_weight"]
-                    for feature_set in self.features
-                    if len(feature_set["training"])
+                    provider.sampling_weight
+                    for provider in self.feature_providers
+                    if provider.get_mode_size("training")
                 ],
                 k=sample_count,
             )
 
-            for i in range(sample_count):
-                feature_set_1 = random_feature_sets[i]
-                feature_1 = random.choice(feature_set_1["training"])
-                spectrogram_1 = feature_set_1["loaded_features"][
-                    feature_1["loaded_feature_index"]
-                ][feature_1["subindex"]]
-
-                if truncation_strategy == "default":
-                    truncation_strategy_1 = feature_set_1["truncation_strategy"]
-                else:
-                    truncation_strategy_1 = truncation_strategy
-
-                spectrogram_1 = fixed_length_spectrogram(
-                    spectrogram_1,
-                    features_length,
-                    truncation_strategy=truncation_strategy_1,
+            for provider in random_feature_providers:
+                spectrogram = provider.get_random_spectrogram(
+                    "training", features_length, truncation_strategy
                 )
-
-                if combination_augments:
-                    feature_set_2 = random_feature_sets2[i]
-                    feature_2 = random.choice(feature_set_2["training"])
-                    spectrogram_2 = feature_set_2["loaded_features"][
-                        feature_2["loaded_feature_index"]
-                    ][feature_2["subindex"]]
-
-                    if truncation_strategy == "default":
-                        truncation_strategy_2 = feature_set_2["truncation_strategy"]
-                    else:
-                        truncation_strategy_2 = truncation_strategy
-
-                    spectrogram_2 = fixed_length_spectrogram(
-                        spectrogram_2,
-                        features_length,
-                        truncation_strategy=truncation_strategy_2,
-                    )
-
-                data[i] = spectrogram_1
-                labels[i] = float(feature_set_1["truth"])
-                weights[i] = float(feature_set_1["penalty_weight"])
-
-                if combination_augments and (
-                    np.random.rand()
-                    < (
-                        augmentation_policy["mix_up_prob"]
-                        + augmentation_policy["freq_mix_prob"]
-                    )
-                ):
-                    mix_ratio = np.random.rand()
-
-                    which_augment = random.choices(
-                        [0, 1],
-                        [
-                            augmentation_policy["mix_up_prob"],
-                            augmentation_policy["freq_mix_prob"],
-                        ],
-                        k=1,
-                    )
-
-                    if which_augment[0] == 0:
-                        data[i], labels[i], weights[i] = mixup_augment(
-                            spectrogram_1,
-                            feature_set_1["truth"],
-                            feature_set_1["penalty_weight"],
-                            spectrogram_2,
-                            feature_set_2["truth"],
-                            feature_set_2["penalty_weight"],
-                            mix_ratio,
-                        )
-                    else:
-                        data[i], labels[i], weights[i] = freqmix_augment(
-                            spectrogram_1,
-                            feature_set_1["truth"],
-                            feature_set_1["penalty_weight"],
-                            spectrogram_2,
-                            feature_set_2["truth"],
-                            feature_set_2["penalty_weight"],
-                            mix_ratio,
-                        )
-
-                data[i] = spec_augment(
-                    data[i],
+                spectrogram = spec_augment(
+                    spectrogram,
                     augmentation_policy["time_mask_max_size"],
                     augmentation_policy["time_mask_count"],
                     augmentation_policy["freq_mask_max_size"],
                     augmentation_policy["freq_mask_count"],
                 )
-        elif (mode == "validation") or (mode == "testing"):
-            index = 0
-            for feature_set in self.features:
-                for feature_index in feature_set[mode]:
-                    spectrogram = feature_set["loaded_features"][
-                        feature_index["loaded_feature_index"]
-                    ][feature_index["subindex"]]
 
-                    if truncation_strategy == "default":
-                        truncation_strategy = feature_set["truncation_strategy"]
+                data.append(spectrogram)
+                labels.append(float(provider.label))
+                weights.append(float(provider.penalty_weight))
+        else:
+            for provider in self.feature_providers:
+                generator = provider.get_feature_generator(
+                    mode, features_length, truncation_strategy
+                )
 
-                    data[index] = fixed_length_spectrogram(
-                        spectrogram,
-                        features_length,
-                        truncation_strategy=truncation_strategy,
-                    )
-                    labels[index] = feature_set["truth"]
-                    weights[index] = feature_set["penalty_weight"]
+                for spectrogram in generator:
+                    data.append(spectrogram)
+                    labels.append(provider.label)
+                    weights.append(provider.penalty_weight)
 
-                    index += 1
+        if truncation_strategy != "none":
+            # Spectrograms are all the same length, convert to numpy array
+            data = np.array(data)
+        labels = np.array(labels)
+        weights = np.array(weights)
 
-            # Randomize the order of the testing and validation sets
-            indices = np.arange(data.shape[0])
+        if truncation_strategy == "none":
+            # Spectrograms may be of different length
+            return data, np.array(labels), np.array(weights)
+
+        indices = np.arange(labels.shape[0])
+
+        if mode == "testing" or "validation":
+            # Randomize the order of the data, weights, and labels
             np.random.shuffle(indices)
 
-            data = data[indices]
-            labels = labels[indices]
-            weights = weights[indices]
-        else:
-            # ambient testing, split the long spectrograms into overlapping chunks
-            index = 0
-            for feature_set in self.features:
-                features_in_this_mode = feature_set[mode]
-
-                if len(features_in_this_mode) > 0:
-                    for features in features_in_this_mode:
-                        spectrogram = feature_set["loaded_features"][
-                            features["loaded_feature_index"]
-                        ][features["subindex"]]
-
-                        if truncation_strategy == "default":
-                            truncation_strategy = feature_set["truncation_strategy"]
-
-                        if truncation_strategy == "split":
-                            for subset_feature_index in range(
-                                0, spectrogram.shape[0], 10
-                            ):
-                                if (
-                                    subset_feature_index + features_length
-                                    < spectrogram.shape[0]
-                                ):
-                                    data[index] = spectrogram[
-                                        subset_feature_index : subset_feature_index
-                                        + features_length
-                                    ]
-                                    labels[index] = 0.0
-                                    weights[index] = 1.0
-                                    index += 1
-                        else:
-                            data.append(spectrogram)
-                            labels[index] = 0.0
-                            weights[index] = 1.0
-
-        return data, labels, weights
+        return data[indices], labels[indices], weights[indices]
