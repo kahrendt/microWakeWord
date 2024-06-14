@@ -142,11 +142,13 @@ sdkconfig.*
 data_training/
 
 trained_models/
+notebooks/*/
 
 *.npy
-
+*.pb
 *.ninja
+*.tar
 
 *.flac
 *.wav
-*.tar
+*.mp3
