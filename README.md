@@ -2,8 +2,7 @@
 
 microWakeWord is an open-source wakeword library for detecting custom wake words on low power devices. It produces models that are suitable for using [TensorFlow Lite for Microcontrollers](https://www.tensorflow.org/lite/microcontrollers). The models are suitable for real-world usage with low false accept and false reject rates.
 
-**microWakeword is currently available as a very early release. microWakeWord can generate features and train models. It does not include sample generation or audio augmentations. The training process produces usable models if you manually fine-tune penalty weights.**
-
+**microWakeword is currently available as an early release. microWakeWord can augment audio, generate features, and train models. It does not include sample generation or an all-in-one training notebook at this time. The training process produces usable models, but it requires much experimentation and tweaking to get really good results.**
 
 ## Benchmarks
 
@@ -48,11 +47,15 @@ The streaming model performs inferences every 20 ms on the newest audio stride. 
 - Some wake word phrases may not need as large of a model. Adjusting ``cnn1_filters``, ``cnn2_filters1``, and ``cnn2_filters2`` can increase or decrease the model size and latency.
 - All convolutions have no padding. The training process ensures the last layer has features representing exactly ``clip_duration_ms``.
 
+### MixedNet Based Model (new)
+- It is based on the paper [MixConv: Mixed Depthwise Convolutional Kernels](https://arxiv.org/abs/1907.09595).
+- This architecture is much faster and uses less memory.
+- Can produce more accurate models than the Inception based models while using far fewer parameters.
+- Hyperparameters can be better optimized.
+
 ### Training Process
 - We augment the spectrograms in several possible ways during training:
     - [SpecAugment](https://arxiv.org/pdf/1904.08779.pdf) masks time and frequency features
-    - [MixUp](https://openreview.net/forum?id=r1Ddp1-Rb) averages two spectrograms and their labels
-    - [FreqMix](https://arxiv.org/pdf/2204.11479.pdf) combines two spectrograms and their labels using a low-pass and high-pass filter.
 - The best weights are chosen as a two-step process:
     1. The top priority is minimizing a specific metric like the false accepts per hour on ambient background noise first.
     2. If the specified minimization target metric is met, then we maximize a different specified metric like accuracy.
@@ -65,162 +68,19 @@ The streaming model performs inferences every 20 ms on the newest audio stride. 
 - We train the model in a non-streaming mode; i.e., it trains on the entire spectrogram. When finished, this is converted to a streaming model that updates every 20 ms.
     - Not padding the convolutions ensures the non-streaming and streaming models have nearly identical prediction behaviors.
     - We estimate the false accepts per hour metric during training by splitting long-duration ambient clips into appropriate-sized spectrograms with a 100 ms stride to simulate the streaming model. This is not a perfect estimate of the streaming model's real-world false accepts per hour, but it is sufficient for determining the best weights.
-- We should generate spectrogram features over a longer time period than needed for training the model. The preprocessor model applies PCAN and noise reduction, and generating features over a longer time period results in models that are better to generalize. _This is not currently automatically implemented in microWakeWord._
+- We should generate spectrogram features over a longer time period than needed for training the model. The preprocessor model applies PCAN and noise reduction, and generating features over a longer time period results in models that are better to generalize.
 - We quantize the streaming models to increase performance on low-power devices. This has a small performance penalty that varies from model to model, but it typically lowers accuracy on the test dataset by around 0.05%.
 
 
 ## Model Training Process
 
-We generate positive and negative samples using [openWakeWord](https://github.com/dscripka/openWakeWord), which relies on [Piper sample generator](https://github.com/rhasspy/piper-sample-generator). We also use openWakeWord's data tools to augment the positive and negative samples. Additional data sources are used for negative data. Currently, microWakeWord does support these steps directly.
+We generate positive and negative samples using [openWakeWord](https://github.com/dscripka/openWakeWord), which relies on [Piper sample generator](https://github.com/rhasspy/piper-sample-generator). 
 
-Audio samples are converted to features are stored as Ragged Mmaps. Currently, only converting wav audio files are supported and no direct audio augmentations are applied.
+The generated samples are augmented while training to increase variability. There are precomputed spectrogram features for various negative datasets available on [Hugging Face](https://huggingface.co/datasets/kahrendt/microwakeword).
 
-```python
-from microwakeword.feature_generation import generate_features_for_folder
+Please see the ``feature_generation.ipynb`` notebook on how to get started with downloading some background datasets and how to augment clips.
 
-generate_features_for_folder(path_to_audio='audio_samples/training', features_output_dir='audio_features/training', set_name='audio_samples')
-```
-
-Training configuration options are stored in a yaml file.
-
-```python
-# Save a yaml config that controls the training process
-import yaml
-import os
-
-config = {}
-
-config['train_dir'] = 'trained_models/alexa'
-
-# Each feature_dir should have at least one of the following folders with this structure:
-#  training/
-#    ragged_mmap_folders_ending_in_mmap
-#  testing/
-#    ragged_mmap_folders_ending_in_mmap
-#  testing_ambient/
-#    ragged_mmap_folders_ending_in_mmap
-#  validation/
-#    ragged_mmap_folders_ending_in_mmap
-#  validation_ambient/
-#    ragged_mmap_folders_ending_in_mmap
-#
-#  sampling_weight: Weight for choosing a spectrogram from this set in the batch
-#  penalty_weight: Penalizing weight for incorrect predictions from this set
-#  truth: Boolean whether this set has positive samples or negative samples
-#  truncation_strategy = If spectrograms in the set are longer than necessary for training, how are they truncated
-#       - random: choose a random portion of the entire spectrogram - useful for long negative samples
-#       - truncate_start: remove the start of the spectrogram
-#       - truncate_end: remove the end of the spectrogram
-#       - split: Split the longer spectrogram into separate spectrograms offset by 100 ms. Only for ambient sets
-
-config['features'] = [
-        {
-            'features_dir': '/Volumes/MachineLearning/training_data/alexa_4990ms_spectrogram/generated_positive',
-            'sampling_weight': 0.25,
-            'penalty_weight': 1,
-            'truth': True,
-            'truncation_strategy': 'truncate_start'
-        },
-        {
-            'features_dir': '/Volumes/MachineLearning/training_data/alexa_4990ms_spectrogram/generated_negative',
-            'sampling_weight': 0.25,
-            'penalty_weight': 1,
-            'truth': False,
-            'truncation_strategy': 'truncate_start'
-        },
-        {
-            'features_dir': '/Volumes/MachineLearning/training_data/english_speech_background_1970ms',
-            'sampling_weight': 0.2,
-            'penalty_weight': 3,
-            'truth': False,
-            'truncation_strategy': 'random'
-        },
-        {
-            'features_dir': '/Volumes/MachineLearning/training_data/cv_corpus_background',
-            'sampling_weight': 0.10,
-            'penalty_weight': 2,
-            'truth': False,
-            'truncation_strategy': 'random'
-        },
-        {
-            'features_dir': '/Volumes/MachineLearning/training_data/no_speech_background_1970ms',
-            'sampling_weight': 0.2,
-            'penalty_weight': 3,
-            'truth': False,
-            'truncation_strategy': 'random'
-        },
-        {
-            'features_dir': '/Volumes/MachineLearning/training_data/ambient_background',
-            'sampling_weight': 0.2,
-            'penalty_weight': 2,
-            'truth': False,
-            'truncation_strategy': 'split'
-        },
-    ]
-
-# Number of training steps in each iteration - various other settings are configured as lists that corresponds to different steps
-config['training_steps'] = [20000, 20000, 20000]        
-
-# Penalizing weight for incorrect class predictions - lists that correspond to training steps
-config["positive_class_weight"] = [1]               
-config["negative_class_weight"] = [1]
-config['learning_rates'] = [0.001, 0.0005, 0.00025]     # Learning rates for Adam optimizer - list that corresponds to training steps
-config['batch_size'] = 100
-
-config['mix_up_augmentation_prob'] =  [0]       # Probability of applying MixUp augmentation - list that corresponds to training steps
-config['freq_mix_augmentation_prob'] = [0]      # Probability of applying FreqMix augmentation - list that corresponds to training steps
-config['time_mask_max_size'] = [5]              # SpecAugment - list that corresponds to training steps
-config['time_mask_count'] = [2]                 # SpecAugment - list that corresponds to training steps
-config['freq_mask_max_size'] = [5]              # SpecAugment - list that corresponds to training steps
-config['freq_mask_count'] = [2]                 # SpecAugment - list that corresponds to training steps
-config['eval_step_interval'] = 500              # Test the validation sets after every this many steps
-
-config['clip_duration_ms'] = 1490   # Maximum length of wake word that the streaming model will accept
-config['window_stride_ms'] = 20     # Fixed setting for default feature generator
-config['window_size_ms'] = 30       # Fixed setting for default feature generator
-config['sample_rate'] = 16000       # Fixed setting for default feature generator
-
-# The best model weights are chosen first by minimizing the specified minimization metric below the specified target_minimization
-# Once the target has been met, it chooses the maximum of the maximization metric. Set 'minimization_metric' to None to only maximize
-# Available metrics:
-#   - "loss" - cross entropy error on validation set
-#   - "accuracy" - accuracy of validation set
-#   - "recall" - recall of validation set
-#   - "precision" - precision of validation set
-#   - "false_positive_rate" - false positive rate of validation set
-#   - "false_negative_rate" - false negative rate of validation set
-#   - "ambient_false_positives" - count of false positives from the split validation_ambient set
-#   - "ambient_false_positives_per_hour" - estimated number of false positives per hour on the split validation_ambient set
-config['minimization_metric'] = 'ambient_false_positives_per_hour'  # Set to N
-config['target_minimization'] = 0.5
-config['maximization_metric'] = 'accuracy'
-
-with open(os.path.join('training_parameters.yaml'), 'w') as file:
-    documents = yaml.dump(config, file)
-```
-
-The model's hyperparameters are specified when calling the training script.
-
-```python
-!python -m microwakeword.model_train_eval \
---training_config='training_parameters.yaml' \
---train 1 \
---restore_checkpoint 1 \
---test_tf_nonstreaming 0 \
---test_tflite_nonstreaming 0 \
---test_tflite_streaming 0 \
---test_tflite_streaming_quantized 1 \
-inception \
---cnn1_filters '32' \
---cnn1_kernel_sizes '5' \
---cnn1_subspectral_groups '4' \
---cnn2_filters1 '24,24,24' \
---cnn2_filters2 '32,64,96' \
---cnn2_kernel_sizes '3,5,5' \
---cnn2_subspectral_groups '1,1,1' \
---cnn2_dilation '1,1,1' \
---dropout 0.8 
-```
+Please see the ``training_notebook.ipynb`` notebook to see how a model is trained.
 
 ## Acknowledgements
 
