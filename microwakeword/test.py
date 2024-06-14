@@ -17,9 +17,12 @@
 """Test utility functions for accuracy evaluation."""
 
 import os
-from absl import logging
+
 import numpy as np
 import tensorflow as tf
+
+from absl import logging
+from typing import list
 
 from microwakeword.inference import Model
 
@@ -86,6 +89,124 @@ def metrics_to_string(metrics):
         fnr=metrics["false_negative_rate"],
         count=metrics["count"],
     )
+
+
+def compute_false_accepts_per_hour(
+    streaming_probabilities_list: list[np.ndarray],
+    cutoffs: np.array,
+    ignore_slices_after_accept: int = 75,
+    step_s: float = 0.02,
+):
+    """Computes the false accept per hour rates at various cutoffs given a list of streaming probabilities.
+
+    Args:
+        streaming_probabilities_list (List[numpy.ndarray]): A list containing streaming probabilities from negative audio clips
+        cutoffs (numpy.array): An array of cutoffs/thresholds to test the false accpet rate at.
+        ignore_slices_after_accept (int, optional): The number of probabililities slices to ignore after a false accept. Defaults to 75.
+        step_s (float, optional): The duration between each probabilitiy in seconds. Defaults to 0.02.
+
+    Returns:
+        numpy.ndarray: The false accepts per hour corresponding to thresholds in `cutoffs`.
+    """
+    cutoffs_count = cutoffs.shape[0]
+
+    false_accepts_at_cutoffs = np.zeros(cutoffs_count)
+    probabilities_duration_h = 0
+
+    for track_probabilities in streaming_probabilities_list:
+        probabilities_duration_h += len(track_probabilities) * step_s / 3600.0
+
+        cooldown_at_cutoffs = np.ones(cutoffs_count) * ignore_slices_after_accept
+
+        for wakeword_probability in track_probabilities:
+            # Decrease the cooldown cutoff by 1 with a minimum value of 0
+            cooldown_at_cutoffs = np.maximum(
+                cooldown_at_cutoffs - 1, np.zeros(cutoffs_count)
+            )
+            detection_boolean = (
+                wakeword_probability > cutoffs
+            )  # a list of detection states at each cutoff
+
+            for index in range(cutoffs_count):
+                if cooldown_at_cutoffs[index] == 0 and detection_boolean[index]:
+                    false_accepts_at_cutoffs[index] += 1
+                    cooldown_at_cutoffs[index] = ignore_slices_after_accept
+
+    return false_accepts_at_cutoffs / probabilities_duration_h
+
+
+def generate_roc_curve(
+    false_accepts_per_hour: np.ndarray,
+    positive_samples_probabilities: np.ndarray,
+    cutoffs: np.ndarray,
+    max_faph: float = 2.0,
+):
+    """Generates the coordinates for an ROC curve plotting false accepts per hour vs false rejections. Computes the false rejection rate at the specifiied cutoffs.
+
+    Args:
+        false_accepts_per_hour (np.ndarray): False accepts per hour rates for each threshold in `cutoffs`.
+        positive_samples_probabilities (np.ndarray): Probabilities for each positive sample.
+        cutoffs (np.ndarray): Thresholds used for `false_ccepts_per_hour`
+        max_faph (float, optional): The maximum false accept per hour rate to include in curve's coordinates. Defaults to 2.0.
+
+    Returns:
+        (numpy.ndarray, numpy.ndarray, numpy.ndarray): (false accept per hour coordinates, false rejection rate coordinates, cutoffs for each coordinate)
+    """
+
+    # Compute the false negative rates at each cutoff
+    false_negative_rate_at_cutoffs = []
+    for cutoff in cutoffs:
+        true_accepts = sum(i > cutoff for i in positive_samples_probabilities)
+        false_negative_rate_at_cutoffs.append(
+            1 - true_accepts / len(positive_samples_probabilities)
+        )
+
+    if false_accepts_per_hour[0] > max_faph:
+        # Use linear interpolation to estimate false negative rate at max_faph
+
+        # Increase the index until we find a faph less than max_faph
+        index_of_first_viable = 1
+        while false_accepts_per_hour[index_of_first_viable] > max_faph:
+            index_of_first_viable += 1
+
+        x0 = false_accepts_per_hour[index_of_first_viable - 1]
+        y0 = false_negative_rate_at_cutoffs[index_of_first_viable - 1]
+        x1 = false_accepts_per_hour[index_of_first_viable]
+        y1 = false_negative_rate_at_cutoffs[index_of_first_viable]
+
+        fnr_at_max_faph = (y0 * (x1 - 2.0) + y1 * (2.0 - x0)) / (x1 - x0)
+        cutoff_at_max_faph = (
+            cutoffs[index_of_first_viable] + cutoffs[index_of_first_viable - 1]
+        ) / 2.0
+    else:
+        # Smallest faph is less than max_faph, so assume the false negative rate is constant
+        index_of_first_viable = 0
+        fnr_at_max_faph = false_negative_rate_at_cutoffs[index_of_first_viable]
+        cutoff_at_max_faph = cutoffs[index_of_first_viable]
+
+    horizontal_coordinates = [max_faph]
+    vertical_coordinates = [fnr_at_max_faph]
+    cutoffs_at_coordinate = [cutoff_at_max_faph]
+
+    for index in range(index_of_first_viable, len(false_negative_rate_at_cutoffs)):
+        if false_accepts_per_hour[index] != horizontal_coordinates[-1]:
+            # Only add a point if it is a new faph
+            # This ensures if a faph rate is repeated, we use the small false negative rate
+            horizontal_coordinates.append(false_accepts_per_hour[index])
+            vertical_coordinates.append(false_negative_rate_at_cutoffs[index])
+            cutoffs_at_coordinate.append(cutoffs[index])
+
+    if horizontal_coordinates[-1] > 0:
+        # If there isn't a cutoff with 0 faph, then add a coordinate at (0,1)
+        horizontal_coordinates.append(0.0)
+        vertical_coordinates.append(1.0)
+        cutoffs_at_coordinate.append(0.0)
+
+    # The points on the curve are listed in descending order, flip them before returning
+    horizontal_coordinates = np.flip(horizontal_coordinates)
+    vertical_coordinates = np.flip(vertical_coordinates)
+    cutoffs_at_coordinate = np.flip(cutoffs_at_coordinate)
+    return horizontal_coordinates, vertical_coordinates, cutoffs_at_coordinate
 
 
 def tf_model_accuracy(
