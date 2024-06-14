@@ -17,7 +17,6 @@
 import os
 
 from absl import logging
-from collections import deque
 
 import numpy as np
 import tensorflow as tf
@@ -33,13 +32,14 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         truncation_strategy="truncate_start",
     )
 
-    test_batch_size = 1000
-
+    test_batch_size = 1024
+    
+    model.reset_metrics()
     for i in range(0, len(testing_fingerprints), test_batch_size):
         result = model.test_on_batch(
             testing_fingerprints[i : i + test_batch_size],
             testing_ground_truth[i : i + test_batch_size],
-            reset_metrics=(i == 0),
+            reset_metrics=False,
         )
 
     true_positives = result[4]
@@ -51,11 +51,13 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         true_positives, true_negatives, false_positives, false_negatives
     )
 
-    metrics["loss"] = result[0]
+    metrics["loss"] = result[9]
     metrics["auc"] = result[8]
 
     ambient_false_positives = 0  # float("nan")
     estimated_ambient_false_positives_per_hour = 0  # float("nan")
+    
+    recall_at_no_faph = 0
 
     if data_processor.get_mode_size("validation_ambient") > 0:
         (
@@ -68,25 +70,135 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             features_length=config["spectrogram_length"],
             truncation_strategy="split",
         )
-
+        model.reset_metrics()
+        
+        cutoffs = np.arange(0.01,1.01,0.01)
+        batch_sum_false_positives = np.zeros(cutoffs.shape[0])
+        
         for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
-            ambient_result = model.test_on_batch(
-                ambient_testing_fingerprints[i : i + test_batch_size],
-                ambient_testing_ground_truth[i : i + test_batch_size],
-                reset_metrics=(i == 0),
+            ambient_predictions = model.predict_on_batch(
+                ambient_testing_fingerprints[i : i + test_batch_size]
             )
+            
+            for index, cutoff in enumerate(cutoffs):
+                batch_sum_false_positives[index] += sum(ambient_predictions > cutoff)
 
-        ambient_false_positives = ambient_result[5]
-
-        estimated_ambient_false_positives_per_hour = ambient_false_positives / (
+        batch_sum_false_positives_per_hour = batch_sum_false_positives/ (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
         )
 
-    metrics["ambient_false_positives"] = ambient_false_positives
-    metrics["ambient_false_positives_per_hour"] = (
-        estimated_ambient_false_positives_per_hour
-    )
+        # false_positive_rates = batch_sum_false_positives/len(ambient_testing_fingerprints)
 
+        ambient_false_positives = batch_sum_false_positives[50] # TODO, don't use hardcoded 50
+        estimated_ambient_false_positives_per_hour = batch_sum_false_positives_per_hour[50]
+        average_viable_recall = 0.0
+        
+        target_faph_cutoff_probability = 1.0
+        for index, cutoff in enumerate(cutoffs):
+            if batch_sum_false_positives_per_hour[index] == 0:
+                target_faph_cutoff_probability = cutoff
+                break
+        
+        if target_faph_cutoff_probability < 1.0:
+            total_positive_sample_count = 0
+            total_predicted_at_cutoff = 0
+            total_predicted_cutoffs = np.zeros(cutoffs.shape[0])
+            for i in range(0, len(testing_fingerprints), test_batch_size):
+                predictions = model.predict_on_batch(
+                    testing_fingerprints[i : i + test_batch_size]
+                )   
+                total_positive_sample_count += sum(testing_ground_truth[i : i + test_batch_size])
+                total_predicted_at_cutoff += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > target_faph_cutoff_probability)
+                for index, cutoff in enumerate(cutoffs):
+                    total_predicted_cutoffs[index] += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > cutoff)
+            
+            recall_at_no_faph = total_predicted_at_cutoff[0]/total_positive_sample_count
+            
+            recall_at_cutoffs = total_predicted_cutoffs/total_positive_sample_count
+            
+            # We want to find the average viable recall when the false accepts per hour is betweeen 0 and 2.0
+            # This is similar to the AUC metric, but it focuses on the actual usable false accept per hour rates for a wake word engine            
+                        
+            if batch_sum_false_positives_per_hour[0] > 2:
+                # Use linear interpolation to estimate recall at 2 faph
+                
+                # Increase index until we find a faph less than 2
+                index_of_first_viable = 1
+                while batch_sum_false_positives_per_hour[index_of_first_viable] > 2:
+                    index_of_first_viable +=1
+                
+                x0 = batch_sum_false_positives_per_hour[index_of_first_viable-1]
+                y0 = recall_at_cutoffs[index_of_first_viable-1]
+                x1 = batch_sum_false_positives_per_hour[index_of_first_viable]
+                y1 = recall_at_cutoffs[index_of_first_viable]
+                
+                recall_at_2faph = (y0*(x1-2.0)+y1*(2.0-x0))/(x1-x0)
+            else:
+                # Lowest faph is already under 2, assume the recall is constant before this
+                index_of_first_viable = 0
+                recall_at_2faph = recall_at_cutoffs[0]
+
+            x_coordinates = [2.0]
+            y_coordinates = [recall_at_2faph]
+                
+            for index in range(index_of_first_viable, len(recall_at_cutoffs)):
+                if batch_sum_false_positives_per_hour[index] != x_coordinates[-1]:
+                    # Only add a point if it is a new faph
+                    # This ensures if a faph rate is repeated, we use the highest recall
+                    x_coordinates.append(batch_sum_false_positives_per_hour[index])
+                    y_coordinates.append(recall_at_cutoffs[index])
+            
+            # Use trapezoid rule to estimate the area under the curve, then divide by 2.0 to get the average recall
+            average_viable_recall = np.trapz(np.flip(y_coordinates),np.flip(x_coordinates))/2.0
+            # x_coordinates = [1.0]
+            # y_coordinates = [1.0]
+            
+            # for index in range(0,len(recall_at_cutoffs)):
+            #     if false_positive_rates[index] != x_coordinates[-1]:
+            #         if batch_sum_false_positives_per_hour[index] > 2:
+            #             # Only compute the ROC curve for faph less than or equal to 2 per hour... that's roughly the useful range
+            #             continue
+            #         x_coordinates.append(false_positive_rates[index])
+            #         y_coordinates.append(recall_at_cutoffs[index])
+                                
+            # max_auc = np.trapz(np.flip(y_coordinates),np.flip(x_coordinates))
+            
+            # false_reject_at_cutoffs = 1-recall_at_cutoffs
+
+            # x_coordinates = [5.0]# [batch_sum_false_positives_per_hour[0]]
+            # y_coordinates = [false_reject_at_cutoffs[0]]
+            
+            # for index in range(1, len(batch_sum_false_positives_per_hour)):
+            #     if batch_sum_false_positives_per_hour[index] < x_coordinates[-1]:
+            #         x_coordinates.append(batch_sum_false_positives[index])
+            #         y_coordinates.append(false_reject_at_cutoffs[index])
+            
+            # x_coordinates = np.array(x_coordinates)
+            # y_coordinates = np.array(y_coordinates)
+            # x_coordinates = x_coordinates[(x_coordinates < 5.0).nonzero()]
+            # y_coordinates = y_coordinates[(x_coordinates < 5.0).nonzero()]
+            
+            # # First coordinate should be at 5.0 faph
+            # np.insert(x_coordinates, 0, 5.0)
+            # np.insert(y_coordinates, 0, y_coordinates[0])
+            
+            # auc = np.trapz(np.flip(y_coordinates), np.flip(x_coordinates))
+            # max_auc = 5-auc
+                
+            
+        metrics["recall_at_no_faph"] = recall_at_no_faph
+        metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
+        metrics["ambient_false_positives"] = ambient_false_positives
+        metrics["ambient_false_positives_per_hour"] = (
+            estimated_ambient_false_positives_per_hour
+        )
+        metrics["average_viable_recall"] = average_viable_recall
+    else:
+        metrics["recall_at_no_faph"] = 0
+        metrics["cutoff_for_no_faph"] = 0
+        metrics["ambient_false_positives"] = 0
+        metrics["ambient_false_positives_per_hour"] = 0
+        metrics["average_viable_recall"] = 0
     return metrics
 
 
@@ -143,6 +255,7 @@ def train(model, config, data_processor):
         tf.keras.metrics.TrueNegatives(name="tn"),
         tf.keras.metrics.FalseNegatives(name="fn"),
         tf.keras.metrics.AUC(name="auc"),
+        tf.keras.metrics.BinaryCrossentropy(name="loss"),
     ]
 
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
@@ -165,8 +278,7 @@ def train(model, config, data_processor):
 
     best_minimization_quantity = 10000
     best_maximization_quantity = 0.0
-
-    results_deque = deque([])
+    best_no_faph_cutoff = 1.0
 
     for training_step in range(1, training_steps_max + 1):
         training_steps_sum = 0
@@ -214,66 +326,55 @@ def train(model, config, data_processor):
             train_ground_truth,
             sample_weight=train_sample_weights,
             class_weight=class_weights,
+            reset_metrics=False,
         )
 
-        with train_writer.as_default():
-            metrics = test.compute_metrics(
-                true_positives=result[4],
-                false_positives=result[5],
-                true_negatives=result[6],
-                false_negatives=result[7],
-            )
+        # Print the running statistics in the current validation epoch
+        print("Validation Batch #{:d}: Accuracy = {:.3f}; Recall = {:.3f}; Precision = {:.3f}; Loss = {:.4f}; Mini-Batch #{:d}".format((training_step//config["eval_step_interval"]+1), result[1], result[2], result[3], result[9], (training_step % config["eval_step_interval"])), end='\r')
 
-            tf.summary.scalar("loss", result[0], step=training_step)
-            tf.summary.scalar("accuracy", result[1], step=training_step)
-            tf.summary.scalar("recall", result[2], step=training_step)
-            tf.summary.scalar("precision", result[3], step=training_step)
-            tf.summary.scalar("fpr", metrics["false_positive_rate"], step=training_step)
-            tf.summary.scalar("fnr", metrics["false_negative_rate"], step=training_step)
-            tf.summary.scalar("auc", result[8], step=training_step)
-
-            if not training_step % 25:
-                train_writer.flush()
-
-        if len(results_deque) >= 5:
-            results_deque.popleft()
-
-        results_deque.append(result)
-
-        if not training_step % 5:
-            loss = 0.0
-            accuracy = 0.0
-            recall = 0.0
-            precision = 0.0
-            for i in range(0, 5):
-                loss += results_deque[i][0]
-                accuracy += results_deque[i][1]
-                recall += results_deque[i][2]
-                precision += results_deque[i][3]
-
+        is_last_step = training_step == training_steps_max
+        if (training_step % config["eval_step_interval"]) == 0 or is_last_step:
             logging.info(
                 "Step #%d: rate %f, accuracy %.2f%%, recall %.2f%%, precision %.2f%%, cross entropy %f",
                 *(
                     training_step,
                     learning_rate,
-                    accuracy / 5.0 * 100,
-                    recall / 5.0 * 100,
-                    precision / 5.0 * 100,
-                    loss / 5.0,
+                    result[1]*100,
+                    result[2]* 100,
+                    result[3] * 100,
+                    result[9],
                 ),
             )
-
-        is_last_step = training_step == training_steps_max
-        if (training_step % config["eval_step_interval"]) == 0 or is_last_step:
+            
+            metrics = test.compute_metrics(
+                true_positives=result[4],
+                false_positives=result[5],
+                true_negatives=result[6],
+                false_negatives=result[7],
+            )     
+            
+            with train_writer.as_default():
+                tf.summary.scalar("loss", result[9], step=training_step)
+                tf.summary.scalar("accuracy", result[1], step=training_step)
+                tf.summary.scalar("recall", result[2], step=training_step)
+                tf.summary.scalar("precision", result[3], step=training_step)
+                tf.summary.scalar("fpr", metrics["false_positive_rate"], step=training_step)
+                tf.summary.scalar("fnr", metrics["false_negative_rate"], step=training_step)
+                tf.summary.scalar("auc", result[8], step=training_step)   
+                train_writer.flush()     
+            
+            
             model.save_weights(os.path.join(config["train_dir"], "last_weights"))
 
             nonstreaming_metrics = validate_nonstreaming(
                 config, data_processor, model, "validation"
             )
+            model.reset_metrics()   # reset metrics for next validation epoch of training
             logging.info(
-                "Step %d (nonstreaming): Validation accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f,",
+                "Step %d (nonstreaming): Validation: recall at no faph = %.3f, accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f, average viable recall = %.9f",
                 *(
                     training_step,
+                    nonstreaming_metrics["recall_at_no_faph"] * 100,
                     nonstreaming_metrics["accuracy"] * 100,
                     nonstreaming_metrics["recall"] * 100,
                     nonstreaming_metrics["precision"] * 100,
@@ -283,6 +384,7 @@ def train(model, config, data_processor):
                     nonstreaming_metrics["ambient_false_positives_per_hour"],
                     nonstreaming_metrics["loss"],
                     nonstreaming_metrics["auc"],
+                    nonstreaming_metrics["average_viable_recall"],
                 ),
             )
 
@@ -319,6 +421,11 @@ def train(model, config, data_processor):
                     nonstreaming_metrics["auc"],
                     step=training_step,
                 )
+                tf.summary.scalar(
+                    "average_viable_recall",
+                    nonstreaming_metrics["average_viable_recall"],
+                    step=training_step,
+                )
                 validation_writer.flush()
 
             model.save_weights(
@@ -339,6 +446,7 @@ def train(model, config, data_processor):
             current_maximization_quantity = nonstreaming_metrics[
                 config["maximization_metric"]
             ]
+            current_no_faph_cutoff = nonstreaming_metrics["cutoff_for_no_faph"]
 
             # Save model weights if this is a new best model
             if (
@@ -374,15 +482,17 @@ def train(model, config, data_processor):
             ):
                 best_minimization_quantity = current_minimization_quantity
                 best_maximization_quantity = current_maximization_quantity
+                best_no_faph_cutoff = current_no_faph_cutoff
 
                 # overwrite the best model weights
                 model.save_weights(os.path.join(config["train_dir"], "best_weights"))
                 checkpoint.save(file_prefix=checkpoint_prefix)
 
             logging.info(
-                "So far the best minimization quantity is %.3f with best maximization quantity of %.5f%%",
+                "So far the best minimization quantity is %.3f with best maximization quantity of %.5f%%; no faph cutoff is %.2f",
                 best_minimization_quantity,
                 (best_maximization_quantity * 100),
+                best_no_faph_cutoff,
             )
 
     # Save checkpoint after training
@@ -395,11 +505,12 @@ def train(model, config, data_processor):
         truncation_strategy="truncate_start",
     )
 
+    model.reset_metrics()
     for i in range(0, len(testing_fingerprints), config["batch_size"]):
         result = model.test_on_batch(
             testing_fingerprints[i : i + config["batch_size"]],
             testing_ground_truth[i : i + config["batch_size"]],
-            reset_metrics=(i == 0),
+            reset_metrics=False,
         )
 
     true_positives = result[4]
