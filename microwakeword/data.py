@@ -186,7 +186,7 @@ class MmapFeatureGenerator(object):
                     )
 
                     duration += (
-                        0.02 * imported_features[i].shape[0]
+                        0.01 * imported_features[i].shape[0]
                     )  # Each feature represents 0.02 seconds of audio TODO: If we use a different window step size, this is incorrect!
                     count += 1
 
@@ -282,8 +282,8 @@ class MmapFeatureGenerator(object):
 
             if truncation_strategy == "split":
                 for feature_start_index in range(
-                    0, spectrogram.shape[0] - features_length, 10
-                ):  # 10 features corresponds to 200 ms
+                    0, spectrogram.shape[0] - features_length, 10*2
+                ):  # 10*2 features corresponds to 200 ms
                     split_spectrogram = spectrogram[
                         feature_start_index : feature_start_index + features_length
                     ]
