@@ -176,6 +176,7 @@ def evaluate_model(
     tflite_output_folders = []
     tflite_filenames = []
     tflite_testing_datasets = []
+    tflite_testing_ambient_datasets = []
     tflite_quantize = []
 
     if test_tflite_nonstreaming:
@@ -183,7 +184,8 @@ def evaluate_model(
         tflite_source_folders.append("non_stream")
         tflite_output_folders.append("tflite_non_stream")
         tflite_filenames.append("non_stream.tflite")
-        tflite_testing_datasets.append(["testing"])
+        tflite_testing_datasets.append("testing")
+        tflite_testing_ambient_datasets.append("testing_ambient")
         tflite_quantize.append(False)
 
     if test_tflite_streaming:
@@ -191,7 +193,8 @@ def evaluate_model(
         tflite_source_folders.append("stream_state_internal")
         tflite_output_folders.append("tflite_stream_state_internal")
         tflite_filenames.append("stream_state_internal.tflite")
-        tflite_testing_datasets.append(["testing", "testing_ambient"])
+        tflite_testing_datasets.append("testing")
+        tflite_testing_ambient_datasets.append("testing_ambient")
         tflite_quantize.append(False)
 
     if test_tflite_streaming_quantized:
@@ -199,7 +202,8 @@ def evaluate_model(
         tflite_source_folders.append("stream_state_internal")
         tflite_output_folders.append("tflite_stream_state_internal_quant")
         tflite_filenames.append("stream_state_internal_quant.tflite")
-        tflite_testing_datasets.append(["testing", "testing_ambient"])
+        tflite_testing_datasets.append("testing")
+        tflite_testing_ambient_datasets.append("testing_ambient")
         tflite_quantize.append(True)
 
     for (
@@ -208,6 +212,7 @@ def evaluate_model(
         output_folder,
         filename,
         testing_datasets,
+        testing_ambient_datasets,
         quantize,
     ) in zip(
         tflite_log_strings,
@@ -215,6 +220,7 @@ def evaluate_model(
         tflite_output_folders,
         tflite_filenames,
         tflite_testing_datasets,
+        tflite_testing_ambient_datasets,
         tflite_quantize,
     ):
         logging.info("Converting " + log_string + " to TFLite")
@@ -227,20 +233,20 @@ def evaluate_model(
             filename,
             quantize=quantize,
         )
-
-        for dataset in testing_datasets:
-            logging.info(
-                "Testing the TFLite " + log_string + " on the " + dataset + " set"
-            )
-            test.tflite_model_accuracy(
-                config,
-                output_folder,
-                data_processor,
-                data_set=dataset,
-                tflite_model_name=filename,
-                accuracy_name=dataset + "_set_metrics.txt",
-            )
-
+        logging.info(
+            "Testing the TFLite "
+            + log_string
+            + " false accept per hour and false rejection rates at various cutoffs."
+        )
+        test.tflite_streaming_model_roc(
+            config,
+            output_folder,
+            data_processor,
+            data_set=testing_datasets,
+            ambient_set=testing_ambient_datasets,
+            tflite_model_name=filename,
+            accuracy_name="tflite_streaming_roc.txt",
+        )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -341,7 +347,7 @@ if __name__ == "__main__":
     # inception model settings
     parser_inception = subparsers.add_parser("inception")
     inception.model_parameters(parser_inception)
-    
+
     # mixednet model settings
     parser_mixednet = subparsers.add_parser("mixednet")
     mixednet.model_parameters(parser_mixednet)
@@ -358,7 +364,7 @@ if __name__ == "__main__":
         raise ValueError("Unknown model type: {}".format(flags.model_name))
 
     logging.set_verbosity(flags.verbosity)
-    
+
     config = load_config(flags, model_module)
 
     data_processor = input_data.FeatureHandler(config)

@@ -27,10 +27,11 @@ class Model:
     Class for loading and running tflite microwakeword models
 
     Args:
-        tflite_model_path (str): path to tflite model file
+        tflite_model_path (str): Path to tflite model file.
+        stride (int | None, optional): Time dimension's stride. If None, then the stride is the input tensor's time dimension. Defaults to None.
     """
 
-    def __init__(self, tflite_model_path: str):
+    def __init__(self, tflite_model_path: str, stride: int | None = None):
         # Load tflite model
         interpreter = tf.lite.Interpreter(
             model_path=tflite_model_path,
@@ -42,6 +43,11 @@ class Model:
 
         self.is_quantized_model = self.input_details[0]["dtype"] == np.int8
         self.input_feature_slices = self.input_details[0]["shape"][1]
+
+        if stride is None:
+            self.stride = self.input_feature_slices
+        else:
+            self.stride = stride
 
         for s in range(len(self.input_details)):
             if self.is_quantized_model:
@@ -61,7 +67,7 @@ class Model:
         """Run the model on a single clip of audio data
 
         Args:
-            data (np.ndarray): input data for the model (16 khz, 16-bit PCM audio data)
+            data (numpy.ndarray): input data for the model (16 khz, 16-bit PCM audio data)
             step_ms (int): The window step sized used for generating the spectrogram in ms. Defaults to 20.
 
         Returns:
@@ -74,10 +80,10 @@ class Model:
         return self.predict_spectrogram(spectrogram)
 
     def predict_spectrogram(self, spectrogram: np.ndarray):
-        """Run the model on a single clip of audio data
+        """Run the model on a single spectrogram
 
         Args:
-            spectrogram (np.ndarray): input spectrogram
+            spectrogram (numpy.ndarray): Input spectrogram.
 
         Returns:
             list: model predictions for the input audio data
@@ -89,8 +95,8 @@ class Model:
 
         # Slice the input data into the required number of chunks
         chunks = []
-        for i in range(0, len(spectrogram), self.input_feature_slices):
-            chunk = spectrogram[i : i + self.input_feature_slices]
+        for last_index in range(self.input_feature_slices, len(spectrogram), self.stride):
+            chunk = spectrogram[last_index-self.input_feature_slices : last_index]
             if len(chunk) == self.input_feature_slices:
                 chunks.append(chunk)
 

@@ -24,6 +24,7 @@ import tensorflow as tf
 from absl import logging
 from typing import List
 from microwakeword.inference import Model
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 def compute_metrics(true_positives, true_negatives, false_positives, false_negatives):
@@ -217,6 +218,8 @@ def tf_model_accuracy(
 ):
     """Function to test a TF model on a specified data set.
 
+    NOTE: This assumes the wakeword is at the end of the spectrogram. The ``tflite_streaming_model_roc`` method does not make this assumption, and you may get vastly different results depending on how word is positioned in the spectrogram in the data set.
+
     Arguments:
         config: dictionary containing microWakeWord training configuration
         folder: folder containing the TF model
@@ -292,6 +295,101 @@ def tf_model_accuracy(
     return metrics
 
 
+def tflite_streaming_model_roc(
+    config,
+    folder,
+    audio_processor,
+    data_set="testing",
+    ambient_set="testing_ambient",
+    tflite_model_name="stream_state_internal.tflite",
+    accuracy_name="tflite_streaming_roc.txt",
+):
+    """Function to test a tflite model false accepts per hour and false rejection rates.
+
+    Model can be streaming or nonstreaming. Nonstreaming models are strided by 1 spectrogram feature in the time dimension.
+
+    Args:
+        config (dict): dictionary containing microWakeWord training configuration
+        folder (str): folder containing the TFLite model
+        audio_processor (FeatureHandler): microWakeWord FeatureHandler object for retrieving spectrograms
+        data_set (str, optional): Dataset for testing recall. Defaults to "testing".
+        ambient_set (str, optional): Dataset for testing false accepts per hour. Defaults to "testing_ambient".
+        tflite_model_name (str, optional): filename of the TFLite model. Defaults to "stream_state_internal.tflite".
+        accuracy_name (str, optional): filename to save metrics at various cutoffs. Defaults to "tflite_streaming_roc.txt".
+
+    Returns:
+        float: The Area under the false accept per hour vs. false rejection curve.
+    """
+
+    model = Model(
+        os.path.join(config["train_dir"], folder, tflite_model_name), stride=1
+    )
+
+    test_ambient_fingerprints, _, _ = audio_processor.get_data(
+        ambient_set,
+        batch_size=config["batch_size"],
+        features_length=config["spectrogram_length"],
+        truncation_strategy="none",
+    )
+
+    logging.info("Testing the " + ambient_set + " set.")
+    ambient_streaming_probabilities = []
+    for spectrogram_track in test_ambient_fingerprints:
+        streaming_probabilities = model.predict_spectrogram(spectrogram_track)
+        sliding_window_probabilities = sliding_window_view(streaming_probabilities, 10)
+        moving_average = sliding_window_probabilities.mean(axis=-1)
+        ambient_streaming_probabilities.append(moving_average)
+
+    cutoffs = np.arange(0, 1.01, 0.01)
+    ignore_slices_after_accept = 75
+
+    faph = compute_false_accepts_per_hour(
+        ambient_streaming_probabilities, cutoffs, ignore_slices_after_accept
+    )
+
+    test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
+        data_set,
+        batch_size=config["batch_size"],
+        features_length=config["spectrogram_length"],
+        truncation_strategy="none",
+    )
+
+    logging.info("Testing the " + data_set + " set.")
+
+    positive_sample_streaming_probabilities = []
+    for i in range(len(test_fingerprints)):
+        if test_ground_truth[i]:
+            # Only test positive samples
+            streaming_probabilities = model.predict_spectrogram(test_fingerprints[i])
+            sliding_window_probabilities = sliding_window_view(
+                streaming_probabilities[ignore_slices_after_accept:], 10
+            )
+            moving_average = sliding_window_probabilities.mean(axis=-1)
+            positive_sample_streaming_probabilities.append(np.max(moving_average))
+
+    x_coordinates, y_coordinates, cutoffs_at_points = generate_roc_curve(
+        false_accepts_per_hour=faph,
+        positive_samples_probabilities=positive_sample_streaming_probabilities,
+        cutoffs=cutoffs,
+    )
+
+    path = os.path.join(config["train_dir"], folder)
+    with open(os.path.join(path, accuracy_name), "wt") as fd:
+        auc = np.trapz(y_coordinates, x_coordinates)
+        auc_string = "AUC {:.5f}".format(auc)
+        logging.info(auc_string)
+        fd.write(auc_string + "\n")
+
+        for i in range(0, x_coordinates.shape[0]):
+            cutoff_string = "Cutoff {:.2f}: frr={:.4f}; faph={:.3f}".format(
+                cutoffs_at_points[i], y_coordinates[i], x_coordinates[i]
+            )
+            logging.info(cutoff_string)
+            fd.write(cutoff_string + "\n")
+
+    return auc
+
+
 def tflite_model_accuracy(
     config,
     folder,
@@ -301,6 +399,8 @@ def tflite_model_accuracy(
     accuracy_name="tflite_model_accuracy.txt",
 ):
     """Function to test a TFLite model on a specified data set.
+
+    NOTE: This assumes the wakeword is at the end of the spectrogram. The ``tflite_streaming_model_roc`` method does not make this assumption, and you may get vastly different results depending on how word is positioned in the spectrogram in the data set.
 
     Model can be streaming or nonstreaming. If tested on an "_ambient" set,
     it detects a false accept if the previous probability was less than 0.5
