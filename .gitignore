@@ -144,6 +144,8 @@ data_training/
 trained_models/
 notebooks/*/
 
+training_parameters.yaml
+
 *.npy
 *.pb
 *.ninja
