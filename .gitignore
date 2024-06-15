@@ -148,6 +148,7 @@ notebooks/*/
 *.pb
 *.ninja
 *.tar
+*.zip
 
 *.flac
 *.wav
