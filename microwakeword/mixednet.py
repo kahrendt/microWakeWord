@@ -91,6 +91,12 @@ def model_parameters(parser_nn):
         default=0,
         help="Pool the temporal dimension before the final fully connected layer. Uses average pooling or max pooling depending on the max_pool argument",
     )
+    parser_nn.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Striding in the time dimension of the initial convolution layer",
+    )
 
 
 def spectrogram_slices_dropped(flags):
@@ -287,7 +293,7 @@ def model(flags, shape, batch_size):
             cell=tf.keras.layers.Conv2D(
                 flags.first_conv_filters,
                 (3, 1),
-                strides=(1, 1),
+                strides=(flags.stride, 1),
                 padding="valid",
                 use_bias=False,
             ),
