@@ -40,7 +40,6 @@ class SpectrogramGeneration:
         step_ms: int = 20,
         split_spectrogram_duration_s: float | None = None,
         slide_frames: int | None = None,
-        **kwargs,
     ):
 
         self.clips = clips

@@ -54,7 +54,6 @@ class Augmentation:
         background_max_snr_db: int = 10,
         min_jitter_s: float = 0.0,
         max_jitter_s: float = 0.0,
-        **kwargs,
     ):
         ############################################
         # Configure audio duration and positioning #

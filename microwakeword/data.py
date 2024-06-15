@@ -406,10 +406,10 @@ class FeatureHandler(object):
                     )
                 )
             elif feature_set["type"] == "clips":
-                clips_handler = Clips(**feature_set)
-                augmentation_applier = Augmentation(**feature_set)
+                clips_handler = Clips(**feature_set['clips_settings'])
+                augmentation_applier = Augmentation(**feature_set['augmentation_settings'])
                 spectrogram_generator = SpectrogramGeneration(
-                    clips_handler, augmentation_applier, **feature_set
+                    clips_handler, augmentation_applier, **feature_set['spectrogram_generation_settings']
                 )
                 self.feature_providers.append(
                     ClipsHandlerWrapperGenerator(
@@ -420,6 +420,15 @@ class FeatureHandler(object):
                         feature_set["truncation_strategy"],
                     )
                 )
+            
+            set_modes = ["training", "validation", "testing", "validation_ambient", "testing_ambient"]
+            total_spectrograms = 0
+            for set in set_modes:
+                total_spectrograms += self.feature_providers[-1].get_mode_size(set)
+                
+            if total_spectrograms == 0:
+                logging.warning("No spectrograms found in a configured feature set:")
+                logging.warning(feature_set)
 
     def get_mode_duration(self, mode: str):
         """Returns the durations of all spectrogram features in the given mode.

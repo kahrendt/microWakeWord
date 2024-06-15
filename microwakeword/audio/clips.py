@@ -51,7 +51,6 @@ class Clips:
         remove_silence: bool = False,
         random_split_seed: int | None = None,
         split_count: int | float = 0.1,
-        **kwargs,
     ):
 
         if min_clip_duration_s is not None:
@@ -151,7 +150,7 @@ class Clips:
 
         self.clips = audio_dataset
 
-    def audio_generator(self, split: str | None = None, repeat: int = 1, **kwargs):
+    def audio_generator(self, split: str | None = None, repeat: int = 1):
         """A Python generator that retrieves all loaded audio clips.
 
         Args:
