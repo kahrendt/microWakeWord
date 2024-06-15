@@ -19,10 +19,7 @@ import os.path
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.python.keras.models import _clone_layers_and_model_config, _clone_layer
-
 from absl import logging
-from typing import Sequence
 
 from microwakeword.layers import modes
 
@@ -312,11 +309,13 @@ def convert_saved_model_to_tflite(
         sample_fingerprints[0][
             0, 1
         ] = 26.0  # guarantee one pixel is the preprocessor max
+
         stride = config["flags"].get("stride", 1)
+
         for spectrogram in sample_fingerprints:
             for i in range(0, spectrogram.shape[0] - 1, 2):
                 sample = spectrogram[i : i + stride, :].astype(np.float32)
-                yield [spectrogram[i : i + stride, :].astype(np.float32)]
+                yield [sample]
 
     converter = tf.compat.v2.lite.TFLiteConverter.from_saved_model(path_to_model)
     converter.experimental_new_quantizer = True
