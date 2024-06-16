@@ -320,7 +320,7 @@ def tflite_streaming_model_roc(
     Returns:
         float: The Area under the false accept per hour vs. false rejection curve.
     """
-    stride = config["flags"].get("stride", 1)
+    stride = config["stride"]
     model = Model(
         os.path.join(config["train_dir"], folder, tflite_model_name), stride=stride
     )

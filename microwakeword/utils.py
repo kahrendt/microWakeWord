@@ -310,7 +310,7 @@ def convert_saved_model_to_tflite(
             0, 1
         ] = 26.0  # guarantee one pixel is the preprocessor max
 
-        stride = config["flags"].get("stride", 1)
+        stride = config["stride"]
 
         for spectrogram in sample_fingerprints:
             for i in range(0, spectrogram.shape[0] - 1, 2):

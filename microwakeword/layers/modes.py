@@ -59,6 +59,6 @@ def get_input_data_shape(config, mode):
     if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
         data_shape = (config["spectrogram_length"], 40)
     else:
-        stride = config["flags"].get("stride", 1)
+        stride = config['stride']
         data_shape = (stride, 40)
     return data_shape

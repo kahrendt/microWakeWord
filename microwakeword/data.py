@@ -127,6 +127,8 @@ class MmapFeatureGenerator(object):
         sampling_weight (float): The sampling weight for how frequently a spectrogram from this dataset is chosen.
         penalty_weight (float): The penalizing weight for incorrect predictions for each spectrogram.
         truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+        stride (int): The stride in the model's first layer.
+        step (float): The window step duration (in seconds).
     """
 
     def __init__(
@@ -136,11 +138,16 @@ class MmapFeatureGenerator(object):
         sampling_weight: float,
         penalty_weight: float,
         truncation_strategy: str,
+        stride: int,
+        step: float,
     ):
         self.label = float(label)
         self.sampling_weight = sampling_weight
         self.penalty_weight = penalty_weight
         self.truncation_strategy = truncation_strategy
+
+        self.stride = stride
+        self.step = step
 
         self.stats = {}
         self.feature_sets = {}
@@ -186,8 +193,8 @@ class MmapFeatureGenerator(object):
                     )
 
                     duration += (
-                        0.01 * imported_features[i].shape[0]
-                    )  # Each feature represents 0.02 seconds of audio TODO: If we use a different window step size, this is incorrect!
+                        step * imported_features[i].shape[0]
+                    )
                     count += 1
 
             random.shuffle(self.feature_sets[set_index])
@@ -282,7 +289,7 @@ class MmapFeatureGenerator(object):
 
             if truncation_strategy == "split":
                 for feature_start_index in range(
-                    0, spectrogram.shape[0] - features_length, 10*2
+                    0, spectrogram.shape[0] - features_length, self.step*self.stride
                 ):  # 10*2 features corresponds to 200 ms
                     split_spectrogram = spectrogram[
                         feature_start_index : feature_start_index + features_length
@@ -403,6 +410,8 @@ class FeatureHandler(object):
                         feature_set["sampling_weight"],
                         feature_set["penalty_weight"],
                         feature_set["truncation_strategy"],
+                        stride = config['stride'],
+                        step = config['window_step_ms']/1000.0,
                     )
                 )
             elif feature_set["type"] == "clips":
