@@ -95,6 +95,7 @@ def compute_false_accepts_per_hour(
     streaming_probabilities_list: List[np.ndarray],
     cutoffs: np.array,
     ignore_slices_after_accept: int = 75,
+    stride: int = 1,
     step_s: float = 0.02,
 ):
     """Computes the false accept per hour rates at various cutoffs given a list of streaming probabilities.
@@ -103,6 +104,7 @@ def compute_false_accepts_per_hour(
         streaming_probabilities_list (List[numpy.ndarray]): A list containing streaming probabilities from negative audio clips
         cutoffs (numpy.array): An array of cutoffs/thresholds to test the false accpet rate at.
         ignore_slices_after_accept (int, optional): The number of probabililities slices to ignore after a false accept. Defaults to 75.
+        stride (int, optional): The stride of the input layer. Defaults to 1.
         step_s (float, optional): The duration between each probabilitiy in seconds. Defaults to 0.02.
 
     Returns:
@@ -114,7 +116,7 @@ def compute_false_accepts_per_hour(
     probabilities_duration_h = 0
 
     for track_probabilities in streaming_probabilities_list:
-        probabilities_duration_h += len(track_probabilities) * step_s / 3600.0
+        probabilities_duration_h += len(track_probabilities) * stride * step_s / 3600.0
 
         cooldown_at_cutoffs = np.ones(cutoffs_count) * ignore_slices_after_accept
 
@@ -344,7 +346,7 @@ def tflite_streaming_model_roc(
     ignore_slices_after_accept = 75
 
     faph = compute_false_accepts_per_hour(
-        ambient_streaming_probabilities, cutoffs, ignore_slices_after_accept
+        ambient_streaming_probabilities, cutoffs, ignore_slices_after_accept, stride=config['stride'], step_s = config["window_step_ms"]/1000
     )
 
     test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
