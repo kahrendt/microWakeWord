@@ -77,7 +77,13 @@ def model_parameters(parser_nn):
         "--first_conv_filters",
         type=int,
         default=32,
-        help="Number of filters on initial convolution layer. Set to 0 to disable",
+        help="Number of filters on initial convolution layer. Set to 0 to disable.",
+    )
+    parser_nn.add_argument(
+        "--first_conv_kernel_size",
+        type=int,
+        default="3",
+        help="Temporal kernel size for the initial convolution layer.",
     )
     parser_nn.add_argument(
         "--spatial_attention",
@@ -110,9 +116,8 @@ def spectrogram_slices_dropped(flags):
     """
     spectrogram_slices_dropped = 0
 
-    # initial 3x1 convolution drops 2
     if flags.first_conv_filters > 0:
-        spectrogram_slices_dropped += 2
+        spectrogram_slices_dropped += flags.first_conv_kernel_size - 1
 
     for repeat, ksize in zip(
         parse(flags.repeat_in_block),
@@ -120,6 +125,7 @@ def spectrogram_slices_dropped(flags):
     ):
         spectrogram_slices_dropped += repeat * (max(ksize) - 1)
 
+    spectrogram_slices_dropped *= flags.stride
     return spectrogram_slices_dropped
 
 
@@ -292,7 +298,7 @@ def model(flags, shape, batch_size):
         net = stream.Stream(
             cell=tf.keras.layers.Conv2D(
                 flags.first_conv_filters,
-                (3, 1),
+                (flags.first_conv_kernel_size, 1),
                 strides=(flags.stride, 1),
                 padding="valid",
                 use_bias=False,

@@ -313,7 +313,7 @@ def convert_saved_model_to_tflite(
         stride = config["stride"]
 
         for spectrogram in sample_fingerprints:
-            for i in range(0, spectrogram.shape[0] - 1, 2):
+            for i in range(0, spectrogram.shape[0] - stride, stride):
                 sample = spectrogram[i : i + stride, :].astype(np.float32)
                 yield [sample]
 

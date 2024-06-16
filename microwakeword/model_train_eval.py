@@ -42,16 +42,16 @@ def load_config(flags, model_module):
     """
     config_filename = flags.training_config
     config = yaml.load(open(config_filename, "r").read(), yaml.Loader)
-    
+
     config["summaries_dir"] = os.path.join(config["train_dir"], "logs/")
-    
-    config['stride'] = flags.__dict__.get("stride", 1)
-    config['window_step_ms'] = config.get('window_step_ms', 20)
+
+    config["stride"] = flags.__dict__.get("stride", 1)
+    config["window_step_ms"] = config.get("window_step_ms", 20)
 
     # Default preprocessor settings
     preprocessor_sample_rate = 16000  # Hz
     preprocessor_window_size = 30  # ms
-    preprocessor_window_step = config['window_step_ms']  # ms
+    preprocessor_window_step = config["window_step_ms"]  # ms
 
     desired_samples = int(preprocessor_sample_rate * config["clip_duration_ms"] / 1000)
 
@@ -59,7 +59,7 @@ def load_config(flags, model_module):
         preprocessor_sample_rate * preprocessor_window_size / 1000
     )
     window_step_samples = int(
-        config['stride'] * preprocessor_sample_rate * preprocessor_window_step / 1000
+        config["stride"] * preprocessor_sample_rate * preprocessor_window_step / 1000
     )
 
     length_minus_window = desired_samples - window_size_samples
@@ -250,6 +250,7 @@ def evaluate_model(
             accuracy_name="tflite_streaming_roc.txt",
         )
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -370,8 +371,6 @@ if __name__ == "__main__":
     config = load_config(flags, model_module)
 
     data_processor = input_data.FeatureHandler(config)
-    
-    
 
     if flags.train:
         model = model_module.model(
