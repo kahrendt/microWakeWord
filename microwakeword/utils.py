@@ -310,6 +310,9 @@ def convert_saved_model_to_tflite(
             0, 1
         ] = 26.0  # guarantee one pixel is the preprocessor max
 
+        # for spectrogram in sample_fingerprints:
+        #     yield spectrogram
+
         stride = config["stride"]
 
         for spectrogram in sample_fingerprints:
@@ -318,13 +321,14 @@ def convert_saved_model_to_tflite(
                 yield [sample]
 
     converter = tf.compat.v2.lite.TFLiteConverter.from_saved_model(path_to_model)
-    converter.experimental_new_quantizer = True
     converter.experimental_enable_resource_variables = True
     converter.experimental_new_converter = True
-    converter._experimental_variable_quantization = True
+
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
     if quantize:
+        converter.experimental_new_quantizer = True
+        converter._experimental_variable_quantization = True
         converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
 
         converter.inference_type = tf.int8

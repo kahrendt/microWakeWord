@@ -22,6 +22,9 @@ from tensorflow.lite.experimental.microfrontend.python.ops import (
 )
 from scipy.io import wavfile
 
+from silero_vad import load_silero_vad, get_speech_timestamps
+
+model = load_silero_vad()
 
 def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20):
     """Generates spectrogram features for the given audio data.
@@ -68,8 +71,34 @@ def save_clip(audio_samples: np.ndarray, output_file: str) -> None:
     """
     wavfile.write(output_file, 16000, audio_samples)
 
+def remove_silence_silero(
+    audio_data: np.ndarray,
+) -> np.ndarray:
+    """ Uses Silero VAD to remove siilence from the audio data
 
-def remove_silence(
+    Args:
+        audio_data (np.ndarray): The input clip's audio samples.
+
+    Returns:
+        np.ndarray: Array with the trimmed audio clip's samples.
+    """
+    integer_type = audio_data.dtype == np.int16
+    if integer_type:
+        audio_data = (audio_data/32767).astype(np.float32)
+        
+    filtered_audio = []    
+    speech_timestamps = get_speech_timestamps(audio_data, model)
+    
+    for timestamp in speech_timestamps:
+        filtered_audio.extend(audio_data[timestamp['start'] : timestamp['end']].tolist())
+        
+    if integer_type:
+        filtered_audio = np.array(filtered_audio*32767).astype(np.int16)
+    else:
+        filtered_audio = np.array(filtered_audio)
+    return filtered_audio
+
+def remove_silence_webrtc(
     audio_data: np.ndarray,
     frame_duration: float = 0.030,
     sample_rate: int = 16000,

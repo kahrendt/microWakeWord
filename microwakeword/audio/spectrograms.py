@@ -60,7 +60,7 @@ class SpectrogramGeneration:
 
         return generate_features_for_clip(clip, self.step_ms)
 
-    def spectrogram_generator(self, random=False, **kwargs):
+    def spectrogram_generator(self, random=False, max_clips=None, **kwargs):
         """A Python generator that retrieves (augmented) spectrograms.
 
         Args:
@@ -71,7 +71,10 @@ class SpectrogramGeneration:
             numpy.ndarry: 2D spectrogram array for the random (augmented) audio clip.
         """
         if random:
-            clip_generator = self.clips.random_audio_generator()
+            if max_clips is not None:
+                clip_generator = self.clips.random_audio_generator(max_clips=max_clips)
+            else:
+                clip_generator = self.clips.random_audio_generator()
         else:
             clip_generator = self.clips.audio_generator(**kwargs)
 

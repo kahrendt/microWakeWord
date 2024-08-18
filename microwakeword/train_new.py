@@ -73,6 +73,9 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         model.reset_metrics()
         
         cutoffs = np.arange(0.01,1.01,0.01)
+        
+        false_positives_at_cutoffs = np.zeros(cutoffs.shape[0])
+        
         batch_sum_false_positives = np.zeros(cutoffs.shape[0])
         
         for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
@@ -81,21 +84,36 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             )
             
             for index, cutoff in enumerate(cutoffs):
-                batch_sum_false_positives[index] += sum(ambient_predictions > cutoff)
+                # batch_sum_false_positives[index] += sum(ambient_predictions > cutoff)
+                false_positives_at_cutoffs[index] += sum(ambient_false_positives > cutoff)
 
-        batch_sum_false_positives_per_hour = batch_sum_false_positives/ (
-            data_processor.get_mode_duration("validation_ambient") / 3600.0
-        )
-
-        # false_positive_rates = batch_sum_false_positives/len(ambient_testing_fingerprints)
+        false_positives_per_hour = false_positives_at_cutoffs/data_processor.get_mode_duration("validation_ambient") / 3600.0
+        
+        positive_samples_probability = []
+        for i in range(0, len(testing_fingerprints), test_batch_size):
+            predictions = model.predict_on_batch(
+                testing_fingerprints[i : i + test_batch_size]
+            )   
+            
+            
+            total_positive_sample_count += sum(testing_ground_truth[i : i + test_batch_size])
+            total_predicted_at_cutoff += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > target_faph_cutoff_probability)
+            for index, cutoff in enumerate(cutoffs):
+                total_predicted_cutoffs[index] += sum(predictions[testing_ground_truth[i : i + test_batch_size].nonzero()] > cutoff)
+        
+        
+        
+        # batch_sum_false_positives_per_hour = batch_sum_false_positives/ (
+        #     data_processor.get_mode_duration("validation_ambient") / 3600.0
+        # )
 
         ambient_false_positives = batch_sum_false_positives[50] # TODO, don't use hardcoded 50
-        estimated_ambient_false_positives_per_hour = batch_sum_false_positives_per_hour[50]
+        estimated_ambient_false_positives_per_hour = false_positives_per_hour[50]
         average_viable_recall = 0.0
         
         target_faph_cutoff_probability = 1.0
         for index, cutoff in enumerate(cutoffs):
-            if batch_sum_false_positives_per_hour[index] == 0:
+            if false_positives_per_hour[index] == 0:
                 target_faph_cutoff_probability = cutoff
                 break
         
@@ -371,11 +389,10 @@ def train(model, config, data_processor):
             )
             model.reset_metrics()   # reset metrics for next validation epoch of training
             logging.info(
-                "Step %d (nonstreaming): Validation: recall at no faph = %.3f with cutoff %.2f, accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f, average viable recall = %.9f",
+                "Step %d (nonstreaming): Validation: recall at no faph = %.3f, accuracy = %.2f%%, recall = %.2f%%, precision = %.2f%%, fpr = %.2f%%, fnr = %.2f%%, ambient false positives = %d, estimated false positives per hour = %.5f, loss = %.5f, auc = %.5f, average viable recall = %.9f",
                 *(
                     training_step,
                     nonstreaming_metrics["recall_at_no_faph"] * 100,
-                    nonstreaming_metrics["cutoff_for_no_faph"],
                     nonstreaming_metrics["accuracy"] * 100,
                     nonstreaming_metrics["recall"] * 100,
                     nonstreaming_metrics["precision"] * 100,

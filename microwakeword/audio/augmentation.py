@@ -37,7 +37,7 @@ class Augmentation:
 
     def __init__(
         self,
-        augmentation_duration_s: float,
+        augmentation_duration_s: float | None = None,
         augmentation_probabilities: dict = {
             "SevenBandParametricEQ": 0.0,
             "TanhDistortion": 0.0,
@@ -62,7 +62,10 @@ class Augmentation:
         self.min_jitter_samples = int(min_jitter_s * 16000)
         self.max_jitter_samples = int(max_jitter_s * 16000)
 
-        self.augmented_samples = int(augmentation_duration_s * 16000)
+        if augmentation_duration_s is not None:
+            self.augmented_samples = int(augmentation_duration_s * 16000)
+        else:
+            self.augmented_samples = None
 
         assert (
             self.min_jitter_samples <= self.max_jitter_samples
@@ -160,6 +163,9 @@ class Augmentation:
         Returns:
             numpy.ndarray: Array of audio samples with `augmented_duration_s` length.
         """
+        if self.augmented_samples is None:
+            return input_audio
+        
         if self.augmented_samples < input_audio.shape[0]:
             # Truncate the too long audio by removing the start of the clip
             input_audio = input_audio[-self.augmented_samples :]

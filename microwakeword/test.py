@@ -139,29 +139,22 @@ def compute_false_accepts_per_hour(
 
 def generate_roc_curve(
     false_accepts_per_hour: np.ndarray,
-    positive_samples_probabilities: np.ndarray,
+    false_rejections: np.ndarray,
+    # positive_samples_probabilities: np.ndarray,
     cutoffs: np.ndarray,
     max_faph: float = 2.0,
 ):
     """Generates the coordinates for an ROC curve plotting false accepts per hour vs false rejections. Computes the false rejection rate at the specifiied cutoffs.
 
     Args:
-        false_accepts_per_hour (np.ndarray): False accepts per hour rates for each threshold in `cutoffs`.
-        positive_samples_probabilities (np.ndarray): Probabilities for each positive sample.
-        cutoffs (np.ndarray): Thresholds used for `false_ccepts_per_hour`
+        false_accepts_per_hour (numpy.ndarray): False accepts per hour rates for each threshold in `cutoffs`.
+        false_rejections (numpy.ndarray): False rejection rates for each threshold in `cutoffs`.
+        cutoffs (numpy.ndarray): Thresholds used for `false_ccepts_per_hour`
         max_faph (float, optional): The maximum false accept per hour rate to include in curve's coordinates. Defaults to 2.0.
 
     Returns:
         (numpy.ndarray, numpy.ndarray, numpy.ndarray): (false accept per hour coordinates, false rejection rate coordinates, cutoffs for each coordinate)
     """
-
-    # Compute the false negative rates at each cutoff
-    false_negative_rate_at_cutoffs = []
-    for cutoff in cutoffs:
-        true_accepts = sum(i > cutoff for i in positive_samples_probabilities)
-        false_negative_rate_at_cutoffs.append(
-            1 - true_accepts / len(positive_samples_probabilities)
-        )
 
     if false_accepts_per_hour[0] > max_faph:
         # Use linear interpolation to estimate false negative rate at max_faph
@@ -172,9 +165,9 @@ def generate_roc_curve(
             index_of_first_viable += 1
 
         x0 = false_accepts_per_hour[index_of_first_viable - 1]
-        y0 = false_negative_rate_at_cutoffs[index_of_first_viable - 1]
+        y0 = false_rejections[index_of_first_viable-1]
         x1 = false_accepts_per_hour[index_of_first_viable]
-        y1 = false_negative_rate_at_cutoffs[index_of_first_viable]
+        y1 = false_rejections[index_of_first_viable-1]
 
         fnr_at_max_faph = (y0 * (x1 - 2.0) + y1 * (2.0 - x0)) / (x1 - x0)
         cutoff_at_max_faph = (
@@ -183,19 +176,19 @@ def generate_roc_curve(
     else:
         # Smallest faph is less than max_faph, so assume the false negative rate is constant
         index_of_first_viable = 0
-        fnr_at_max_faph = false_negative_rate_at_cutoffs[index_of_first_viable]
+        fnr_at_max_faph = false_rejections[index_of_first_viable]
         cutoff_at_max_faph = cutoffs[index_of_first_viable]
 
     horizontal_coordinates = [max_faph]
     vertical_coordinates = [fnr_at_max_faph]
     cutoffs_at_coordinate = [cutoff_at_max_faph]
 
-    for index in range(index_of_first_viable, len(false_negative_rate_at_cutoffs)):
+    for index in range(index_of_first_viable, len(false_rejections)):
         if false_accepts_per_hour[index] != horizontal_coordinates[-1]:
             # Only add a point if it is a new faph
             # This ensures if a faph rate is repeated, we use the small false negative rate
             horizontal_coordinates.append(false_accepts_per_hour[index])
-            vertical_coordinates.append(false_negative_rate_at_cutoffs[index])
+            vertical_coordinates.append(false_rejections[index])
             cutoffs_at_coordinate.append(cutoffs[index])
 
     if horizontal_coordinates[-1] > 0:
@@ -305,6 +298,8 @@ def tflite_streaming_model_roc(
     ambient_set="testing_ambient",
     tflite_model_name="stream_state_internal.tflite",
     accuracy_name="tflite_streaming_roc.txt",
+    sliding_window_length=5,
+    ignore_slices_after_accept = 25,
 ):
     """Function to test a tflite model false accepts per hour and false rejection rates.
 
@@ -318,6 +313,7 @@ def tflite_streaming_model_roc(
         ambient_set (str, optional): Dataset for testing false accepts per hour. Defaults to "testing_ambient".
         tflite_model_name (str, optional): filename of the TFLite model. Defaults to "stream_state_internal.tflite".
         accuracy_name (str, optional): filename to save metrics at various cutoffs. Defaults to "tflite_streaming_roc.txt".
+        sliding_window_length (int, optional): the length of the sliding window for computing average probabilities. Defaults to 1.
 
     Returns:
         float: The Area under the false accept per hour vs. false rejection curve.
@@ -338,12 +334,12 @@ def tflite_streaming_model_roc(
     ambient_streaming_probabilities = []
     for spectrogram_track in test_ambient_fingerprints:
         streaming_probabilities = model.predict_spectrogram(spectrogram_track)
-        sliding_window_probabilities = sliding_window_view(streaming_probabilities, 10)
+        sliding_window_probabilities = sliding_window_view(streaming_probabilities, sliding_window_length)
         moving_average = sliding_window_probabilities.mean(axis=-1)
         ambient_streaming_probabilities.append(moving_average)
 
     cutoffs = np.arange(0, 1.01, 0.01)
-    ignore_slices_after_accept = 75
+    # ignore_slices_after_accept = 25
 
     faph = compute_false_accepts_per_hour(
         ambient_streaming_probabilities, cutoffs, ignore_slices_after_accept, stride=config['stride'], step_s = config["window_step_ms"]/1000
@@ -364,14 +360,22 @@ def tflite_streaming_model_roc(
             # Only test positive samples
             streaming_probabilities = model.predict_spectrogram(test_fingerprints[i])
             sliding_window_probabilities = sliding_window_view(
-                streaming_probabilities[ignore_slices_after_accept:], 10
+                streaming_probabilities[ignore_slices_after_accept:], sliding_window_length
             )
             moving_average = sliding_window_probabilities.mean(axis=-1)
             positive_sample_streaming_probabilities.append(np.max(moving_average))
 
+    # Compute the false negative rates at each cutoff
+    false_negative_rate_at_cutoffs = []
+    for cutoff in cutoffs:
+        true_accepts = sum(i > cutoff for i in positive_sample_streaming_probabilities)
+        false_negative_rate_at_cutoffs.append(
+            1 - true_accepts / len(positive_sample_streaming_probabilities)
+        )
+
     x_coordinates, y_coordinates, cutoffs_at_points = generate_roc_curve(
         false_accepts_per_hour=faph,
-        positive_samples_probabilities=positive_sample_streaming_probabilities,
+        false_rejections=false_negative_rate_at_cutoffs,
         cutoffs=cutoffs,
     )
 

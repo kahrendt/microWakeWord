@@ -122,6 +122,7 @@ def evaluate_model(
     data_processor,
     test_tf_nonstreaming,
     test_tflite_nonstreaming,
+    test_tflite_nonstreaming_quantized,
     test_tflite_streaming,
     test_tflite_streaming_quantized,
 ):
@@ -135,11 +136,12 @@ def evaluate_model(
         model (Keras model): model (with loaded weights) to test
         data_processor (FeatureHandler): feature handler that loads spectrogram data
         test_tf_nonstreaming (bool): Evaluate the nonstreaming SavedModel
+        test_tflite_nonstreaming_quantized (bool): Convert and evaluate quantized nonstreaming TFLite model
         test_tflite_nonstreaming (bool): Convert and evaluate nonstreaming TFLite model
         test_tflite_streaming (bool): Convert and evaluate streaming TFLite model
         test_tflite_streaming_quantized (bool): Convert and evaluate quantized streaming TFLite model
     """
-    if test_tf_nonstreaming or test_tflite_nonstreaming:
+    if test_tf_nonstreaming or test_tflite_nonstreaming or test_tflite_nonstreaming_quantized:
         # Save the nonstreaming model to disk
         logging.info("Saving nonstreaming model")
 
@@ -189,6 +191,15 @@ def evaluate_model(
         tflite_testing_datasets.append("testing")
         tflite_testing_ambient_datasets.append("testing_ambient")
         tflite_quantize.append(False)
+
+    if test_tflite_nonstreaming_quantized:
+        tflite_log_strings.append("quantized nonstreaming model")
+        tflite_source_folders.append("non_stream")
+        tflite_output_folders.append("tflite_non_stream_quant")
+        tflite_filenames.append("non_stream_quant.tflite")
+        tflite_testing_datasets.append("testing")
+        tflite_testing_ambient_datasets.append("testing_ambient")
+        tflite_quantize.append(True)
 
     if test_tflite_streaming:
         tflite_log_strings.append("streaming model")
@@ -278,6 +289,12 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Save the TFLite nonstreaming model and test on the test datasets",
+    )
+    parser.add_argument(
+        "--test_tflite_nonstreaming_quantized",
+        type=int,
+        default=0,
+        help="Save the TFLite quantized nonstreaming model and test on the test datasets",
     )
     parser.add_argument(
         "--test_tflite_streaming",
@@ -396,12 +413,15 @@ if __name__ == "__main__":
             os.path.join(config["train_dir"], flags.use_weights)
         ).expect_partial()
 
+        logging.info(model.summary())
+
         evaluate_model(
             config,
             model,
             data_processor,
             flags.test_tf_nonstreaming,
             flags.test_tflite_nonstreaming,
+            flags.test_tflite_nonstreaming_quantized,
             flags.test_tflite_streaming,
             flags.test_tflite_streaming_quantized,
         )

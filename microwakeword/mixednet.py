@@ -123,9 +123,9 @@ def spectrogram_slices_dropped(flags):
         parse(flags.repeat_in_block),
         parse(flags.mixconv_kernel_sizes),
     ):
-        spectrogram_slices_dropped += repeat * (max(ksize) - 1)
+        spectrogram_slices_dropped += (repeat * (max(ksize) - 1))*flags.stride
 
-    spectrogram_slices_dropped *= flags.stride
+    # spectrogram_slices_dropped *= flags.stride
     return spectrogram_slices_dropped
 
 

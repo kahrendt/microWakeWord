@@ -24,7 +24,7 @@ import numpy as np
 
 from pathlib import Path
 
-from microwakeword.audio.audio_utils import remove_silence
+from microwakeword.audio.audio_utils import remove_silence_webrtc, remove_silence_silero
 
 
 class Clips:
@@ -49,9 +49,12 @@ class Clips:
         max_clip_duration_s: float | None = None,
         repeat_clip_min_duration_s: float | None = None,
         remove_silence: bool = False,
+        remove_silence_engine: str = "webrtcvad",
         random_split_seed: int | None = None,
         split_count: int | float = 0.1,
+        trimmed_clip_duration_s: float | None = None,
     ):
+        self.trimmed_clip_duration_s = trimmed_clip_duration_s
 
         if min_clip_duration_s is not None:
             self.min_clip_duration_s = min_clip_duration_s
@@ -69,6 +72,10 @@ class Clips:
             self.repeat_clip_min_duration_s = 0.0
 
         self.remove_silence = remove_silence
+        if remove_silence_engine == "webrtcvad":
+            self.remove_silence_function = remove_silence_webrtc
+        else:
+            self.remove_silence_function = remove_silence_silero
 
         paths_to_clips = [str(i) for i in Path(input_directory).glob(file_pattern)]
 
@@ -169,7 +176,11 @@ class Clips:
                 clip_audio = clip["audio"]["array"]
 
                 if self.remove_silence:
-                    clip_audio = remove_silence(clip_audio)
+                    clip_audio = self.remove_silence_function(clip_audio)
+                
+                if self.trimmed_clip_duration_s:
+                    total_samples = int(self.trimmed_clip_duration_s*16000)
+                    clip_audio = clip_audio[:total_samples]
 
                 clip_audio = self.repeat_clip(clip_audio)
                 yield clip_audio
@@ -184,7 +195,7 @@ class Clips:
         clip_audio = rand_audio_entry["audio"]["array"]
 
         if self.remove_silence:
-            clip_audio = remove_silence(clip_audio)
+            clip_audio = self.remove_silence_function(clip_audio)
 
         clip_audio = self.repeat_clip(clip_audio)
         return clip_audio
