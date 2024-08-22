@@ -29,6 +29,38 @@ from microwakeword.audio.clips import Clips
 from microwakeword.audio.augmentation import Augmentation
 from microwakeword.audio.spectrograms import SpectrogramGeneration
 
+from microwakeword.audio.audio_utils import generate_features_for_clip
+
+import torch
+
+torch.set_num_threads(1)
+SAMPLING_RATE = 16000
+USE_ONNX = True
+model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                              model='silero_vad',
+                              force_reload=False,
+                              onnx=USE_ONNX)
+
+(get_speech_timestamps,
+ save_audio,
+ read_audio,
+ VADIterator,
+ collect_chunks) = utils
+
+vad_iterator = VADIterator(model, sampling_rate=SAMPLING_RATE)
+
+def silero_vad_probs(audio_samples):
+    # speech_probs = []
+    window_size_samples = 512 if SAMPLING_RATE == 16000 else 256
+    for i in range(0, audio_samples.shape[1], window_size_samples):
+        chunk = torch.from_numpy(audio_samples[:,i:i+ window_size_samples])
+        if chunk.shape[1] < window_size_samples:
+            break
+        speech_prob = model(chunk, SAMPLING_RATE)
+        # speech_probs.append(speech_prob)
+    vad_iterator.reset_states() # reset model states after each audio
+    
+    return speech_prob.numpy()
 
 def spec_augment(
     spectrogram: np.ndarray,
@@ -386,6 +418,91 @@ class ClipsHandlerWrapperGenerator(object):
             yield x
 
 
+# class DistilClipsHandlerWrapperGenerator(object):
+#     """A class that handles loading spectrograms from audio files on the disk to use while training. This generates spectrograms with random augmentations applied during the training process.
+
+#     Args:
+#         spectrogram_generation (SpectrogramGeneration): Object that handles generating spectrograms from audio files.
+#         label (bool): The class each spectrogram represents; i.e., wakeword or not.
+#         sampling_weight (float): The sampling weight for how frequently a spectrogram from this dataset is chosen.
+#         penalty_weight (float): The penalizing weight for incorrect predictions for each spectrogram.
+#         truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+#     """
+
+#     def __init__(
+#         self,
+#         clips_handler: Clips,
+#         augmented_generation: Augmentation,
+#         sampling_weight: float,
+#         penalty_weight: float,
+#         truncation_strategy: str,
+#     ):
+#         self.clips = clips_handler
+#         self.augment_generation = augmented_generation
+#         self.sampling_weight = sampling_weight
+#         self.penalty_weight = penalty_weight
+#         self.truncation_strategy = truncation_strategy
+
+#         self.augmented_generator = self.augment_generation.augment_generator(
+#             self.clips.random_audio_generator()
+#         )
+
+#     def get_mode_duration(self, mode):
+#         """Function to maintain compatability with the MmapFeatureGenerator class."""
+#         return 0.0
+
+#     def get_mode_size(self, mode):
+#         """Function to maintain compatability with the MmapFeatureGenerator class. This class is intended only for retrieving spectrograms for training."""
+#         if mode == "training":
+#             return len(self.clips.clips)
+#         else:
+#             return 0
+
+#     def get_random_spectrogram(self, mode, features_length, truncation_strategy):
+#         """Retrieves a random spectrogram from the specified mode with specified length after truncation.
+
+#         Args:
+#             mode (str): Specifies the set, but is ignored for this class. It is assumed the spectrograms will be for training.
+#             features_length (int): The length of the spectrogram in feature windows.
+#             truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+
+#         Returns:
+#             numpy.ndarray: A random spectrogram of specified length after truncation.
+#         """
+
+#         if truncation_strategy == "default":
+#             truncation_strategy = self.truncation_strategy
+
+#         augmented_clip = next(self.augmented_generator)
+        
+#         return augmented_clip
+        
+#         # mww_features = generate_features_for_clip(augmented_clip)
+#         # silero_prob = np.array(silero_vad_probs(augmented_clip)[-1])
+
+#         # spectrogram = fixed_length_spectrogram(
+#         #     mww_features,
+#         #     features_length,
+#         #     truncation_strategy,
+#         # )
+
+#         # # Spectrograms with type np.uint16 haven't been scaled
+#         # if np.issubdtype(spectrogram.dtype, np.uint16):
+#         #     spectrogram = spectrogram.astype(np.float32) * 0.0390625
+
+#         # return spectrogram, silero_prob
+
+#     def get_feature_generator(
+#         self,
+#         mode,
+#         features_length,
+#         truncation_strategy="default",
+#     ):
+#         """Function to maintain compatability with the MmapFeatureGenerator class."""
+#         for x in []:
+#             yield x, 0.0
+
+
 class FeatureHandler(object):
     """Class that handles loading spectrogram features and providing them to the training and testing functions.
 
@@ -433,7 +550,20 @@ class FeatureHandler(object):
                         feature_set["truncation_strategy"],
                     )
                 )
-
+            # elif feature_set["type"] == "distil_clips":
+            #     clips_handler = Clips(**feature_set["clips_settings"])
+            #     augmentation_applier = Augmentation(
+            #         **feature_set["augmentation_settings"]
+            #     )            
+            #     self.feature_providers.append(
+            #         DistilClipsHandlerWrapperGenerator(
+            #             clips_handler,
+            #             augmentation_applier,
+            #             feature_set["sampling_weight"],
+            #             feature_set["penalty_weight"],
+            #             feature_set["truncation_strategy"],
+            #         )
+            #     )
             set_modes = [
                 "training",
                 "validation",
@@ -551,6 +681,50 @@ class FeatureHandler(object):
                 data.append(spectrogram)
                 labels.append(float(provider.label))
                 weights.append(float(provider.penalty_weight))
+
+            # for provider in random_feature_providers:
+            #     audio_clip = provider.get_random_spectrogram(
+            #         "training", features_length, truncation_strategy
+            #     )
+
+            #     mww_features = generate_features_for_clip(audio_clip)
+            #     # silero_prob = np.array(silero_vad_probs(augmented_clip)[-1])
+
+            #     if first_clip:
+            #         stacked_clip = audio_clip
+            #         first_clip = False
+            #     else:
+            #         stacked_clip = np.vstack((stacked_clip, audio_clip))
+
+            #     spectrogram = fixed_length_spectrogram(
+            #         mww_features,
+            #         features_length,
+            #         truncation_strategy,
+            #     )
+
+            #     # Spectrograms with type np.uint16 haven't been scaled
+            #     if np.issubdtype(spectrogram.dtype, np.uint16):
+            #         spectrogram = spectrogram.astype(np.float32) * 0.0390625
+
+            #     spectrogram = spec_augment(
+            #         spectrogram,
+            #         augmentation_policy["time_mask_max_size"],
+            #         augmentation_policy["time_mask_count"],
+            #         augmentation_policy["freq_mask_max_size"],
+            #         augmentation_policy["freq_mask_count"],
+            #     )
+
+            #     data.append(spectrogram)
+            #     # labels.append(label)
+            #     weights.append(float(provider.penalty_weight))
+            # labels = silero_vad_probs(stacked_clip)
+            
+            # for i in range(0, len(labels)):
+            #     current_label = labels[i]
+            #     if current_label > 0.5:
+            #         labels[i] = min(current_label+0.15, 1.0)
+            #     else:
+            #         labels[i] = max(current_label-0.15, 0.0)
         else:
             for provider in self.feature_providers:
                 generator = provider.get_feature_generator(
