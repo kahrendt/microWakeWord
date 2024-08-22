@@ -69,10 +69,15 @@ def save_clip(audio_samples: np.ndarray, output_file: str) -> None:
         audio_samples (numpy.ndarray): The clip's audio samples.
         output_file (str): Path to the desired output file.
     """
+    if audio_samples.dtype in (np.float32, np.float64):
+        audio_samples = (audio_samples * 32767).astype(np.int16)
     wavfile.write(output_file, 16000, audio_samples)
 
 def remove_silence_silero(
     audio_data: np.ndarray,
+    threshold: float = 0.8,
+    speech_pad_ms: int = 0, # 30,
+    min_silence_duration_ms: int = 100,
 ) -> np.ndarray:
     """ Uses Silero VAD to remove siilence from the audio data
 
@@ -85,13 +90,16 @@ def remove_silence_silero(
     integer_type = audio_data.dtype == np.int16
     if integer_type:
         audio_data = (audio_data/32767).astype(np.float32)
+    
+    # # Pad to make sure there is enough time after the speech for hte min_silence_duratioN_ms to kick in
+    # audio_data = np.pad(audio_data, (0,int(2*min_silence_duration_ms/1000*16000)), 'constant', constant_values=(0,0))
         
     filtered_audio = []    
-    speech_timestamps = get_speech_timestamps(audio_data, model)
+    speech_timestamps = get_speech_timestamps(audio_data, model, threshold=threshold, speech_pad_ms=speech_pad_ms, min_silence_duration_ms=min_silence_duration_ms)
     
     for timestamp in speech_timestamps:
         filtered_audio.extend(audio_data[timestamp['start'] : timestamp['end']].tolist())
-        
+    
     if integer_type:
         filtered_audio = np.array(filtered_audio*32767).astype(np.int16)
     else:

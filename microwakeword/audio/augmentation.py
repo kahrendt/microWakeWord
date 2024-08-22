@@ -54,7 +54,9 @@ class Augmentation:
         background_max_snr_db: int = 10,
         min_jitter_s: float = 0.0,
         max_jitter_s: float = 0.0,
+        truncate_randomly: bool = False,
     ):
+        self.truncate_randomly = truncate_randomly
         ############################################
         # Configure audio duration and positioning #
         ############################################
@@ -168,7 +170,11 @@ class Augmentation:
         
         if self.augmented_samples < input_audio.shape[0]:
             # Truncate the too long audio by removing the start of the clip
-            input_audio = input_audio[-self.augmented_samples :]
+            if self.truncate_randomly:
+                random_start = np.random.randint(0, input_audio.shape[0]-self.augmented_samples)
+                input_audio = input_audio[random_start:random_start+self.augmented_samples]
+            else:
+                input_audio = input_audio[-self.augmented_samples :]
         else:
             # Pad with zeros at start of too short audio clip
             left_padding_samples = self.augmented_samples - input_audio.shape[0]

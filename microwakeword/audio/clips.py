@@ -53,7 +53,9 @@ class Clips:
         random_split_seed: int | None = None,
         split_count: int | float = 0.1,
         trimmed_clip_duration_s: float | None = None,
+        trim_zeros: bool = False,
     ):
+        self.trim_zeros = trim_zeros
         self.trimmed_clip_duration_s = trimmed_clip_duration_s
 
         if min_clip_duration_s is not None:
@@ -178,6 +180,9 @@ class Clips:
                 if self.remove_silence:
                     clip_audio = self.remove_silence_function(clip_audio)
                 
+                if self.trim_zeros:
+                    clip_audio = np.trim_zeros(clip_audio)
+                
                 if self.trimmed_clip_duration_s:
                     total_samples = int(self.trimmed_clip_duration_s*16000)
                     clip_audio = clip_audio[:total_samples]
@@ -196,6 +201,13 @@ class Clips:
 
         if self.remove_silence:
             clip_audio = self.remove_silence_function(clip_audio)
+
+        if self.trim_zeros:
+            clip_audio = np.trim_zeros(clip_audio)
+        
+        if self.trimmed_clip_duration_s:
+            total_samples = int(self.trimmed_clip_duration_s*16000)
+            clip_audio = clip_audio[:total_samples]
 
         clip_audio = self.repeat_clip(clip_audio)
         return clip_audio
