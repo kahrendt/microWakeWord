@@ -95,7 +95,7 @@ class Model:
 
         # Slice the input data into the required number of chunks
         chunks = []
-        for last_index in range(self.input_feature_slices, len(spectrogram), self.stride):
+        for last_index in range(self.input_feature_slices, len(spectrogram)+1, self.stride):
             chunk = spectrogram[last_index-self.input_feature_slices : last_index]
             if len(chunk) == self.input_feature_slices:
                 chunks.append(chunk)
@@ -162,4 +162,5 @@ class Model:
         # e.g., (tflm_output_quant -output_zero_point) and
         # (tflm_output_quant + (-output_zero_point))
         # can produce different results (int8 calculation)
-        return output_scale * (data.astype(np.float32) - output_zero_point)
+        # return output_scale * (data.astype(np.float32) - output_zero_point)
+        return 1/255.0 * (data.astype(np.float32) - output_zero_point)
