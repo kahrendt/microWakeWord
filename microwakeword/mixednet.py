@@ -146,6 +146,29 @@ def _get_shape_value(maybe_v2_shape):
         return maybe_v2_shape.value
 
 
+def power_to_db(S, amin=1e-16, top_db=80.0):
+    """Convert a power-spectrogram (magnitude squared) to decibel (dB) units.
+    Computes the scaling ``10 * log10(S / max(S))`` in a numerically
+    stable way.
+    Based on:
+    https://librosa.github.io/librosa/generated/librosa.core.power_to_db.html
+    """
+    def _tf_log10(x):
+        numerator = tf.math.log(x)
+        denominator = tf.math.log(tf.constant(10, dtype=numerator.dtype))
+        return numerator / denominator
+    
+    # Scale magnitude relative to maximum value in S. Zeros in the output 
+    # correspond to positions where S == ref.
+    ref = tf.reduce_max(S)
+
+    log_spec = 10.0 * _tf_log10(tf.maximum(amin, S))
+    log_spec -= 10.0 * _tf_log10(tf.maximum(amin, ref))
+
+    log_spec = tf.maximum(log_spec, tf.reduce_max(log_spec) - top_db)
+
+    return log_spec
+
 class MixConv(object):
     """MixConv with mixed depthwise convolutional kernels.
 
@@ -254,7 +277,7 @@ class SpatialAttention(object):
 
         return net * attention
 
-
+import numpy as np
 def model(flags, shape, batch_size):
     """MixedNet model.
 
@@ -290,8 +313,19 @@ def model(flags, shape, batch_size):
     )
     net = input_audio
 
-    # make it [batch, time, 1, feature]
+
+    # log_max = tf.keras.layers.Lambda(
+    #     lambda x: tf.math.log(tf.math.maximum(x, 1e-12)))
+    # net = log_max(net)
+    
+    # dct = 2.0 * np.cos(np.pi * np.outer(
+    #       np.arange(40) * 2.0 + 1.0, np.arange(40)) /
+    #                           (2.0 * 40))
+    
+    # net = tf.matmul(net, dct)
+
     net = tf.keras.backend.expand_dims(net, axis=2)
+
 
     # Streaming Conv2D with 'valid' padding
     if flags.first_conv_filters > 0:
