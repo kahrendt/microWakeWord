@@ -52,6 +52,8 @@ class Augmentation:
         background_paths: List[str] = [],
         background_min_snr_db: int = -10,
         background_max_snr_db: int = 10,
+        color_min_snr_db: int = 10,
+        color_max_snr_db: int = 30,
         min_jitter_s: float = 0.0,
         max_jitter_s: float = 0.0,
         truncate_randomly: bool = False,
@@ -123,8 +125,8 @@ class Augmentation:
                 ),
                 audiomentations.AddColorNoise(
                     p=augmentation_probabilities.get("AddColorNoise", 0.0),
-                    min_snr_db=10,
-                    max_snr_db=30,
+                    min_snr_db=color_min_snr_db,
+                    max_snr_db=color_max_snr_db,
                 ),
                 background_noise_augment,
                 audiomentations.GainTransition(
