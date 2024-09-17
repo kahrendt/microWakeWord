@@ -22,11 +22,15 @@ from tensorflow.lite.experimental.microfrontend.python.ops import (
 )
 from scipy.io import wavfile
 
+from microwakeword.audio.cGenerateFeatures import generate_features
+
 from silero_vad import load_silero_vad, get_speech_timestamps
 
 model = load_silero_vad()
 
-def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20):
+
+
+def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20, use_c: bool = True):
     """Generates spectrogram features for the given audio data.
 
     Args:
@@ -40,6 +44,9 @@ def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20):
     # Convert any float formatted audio data to an int16 array
     if audio_samples.dtype in (np.float32, np.float64):
         audio_samples = (audio_samples * 32767).astype(np.int16)
+
+    if use_c:
+        return generate_features(audio_samples)
 
     with tf.device("/cpu:0"):
         # The default settings match the TFLM preprocessor settings.
