@@ -393,8 +393,9 @@ if __name__ == "__main__":
         model = model_module.model(
             flags, config["training_input_shape"], config["batch_size"]
         )
+        training_model = tf.keras.Model(model.input, model.output[0])
         logging.info(model.summary())
-        train_model(config, model, data_processor, flags.restore_checkpoint)
+        train_model(config, training_model, data_processor, flags.restore_checkpoint)
     else:
         if not os.path.isdir(config["train_dir"]):
             raise ValueError('model is not trained set "--train 1" and retrain it')

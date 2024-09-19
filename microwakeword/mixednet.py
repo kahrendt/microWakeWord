@@ -391,7 +391,7 @@ def model(flags, shape, batch_size):
             else:
                 net = tf.keras.layers.AveragePooling2D(pool_size=(net.shape[1], 1))(net)
 
-    net = tf.keras.layers.Flatten()(net)
-    net = tf.keras.layers.Dense(1, activation="sigmoid")(net)
+    d_vector = tf.keras.layers.Flatten()(net)
+    net = tf.keras.layers.Dense(1, activation="sigmoid")(d_vector)
 
-    return tf.keras.Model(input_audio, net)
+    return tf.keras.Model(input_audio, [net, d_vector])
