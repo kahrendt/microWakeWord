@@ -92,6 +92,8 @@ class Model:
         # Spectrograms with type np.uint16 haven't been scaled
         if np.issubdtype(spectrogram.dtype, np.uint16):
             spectrogram = spectrogram.astype(np.float32) * 0.0390625
+        elif np.issubdtype(spectrogram.dtype, np.float64):
+            spectrogram = spectrogram.astype(np.float32)
 
         # Slice the input data into the required number of chunks
         chunks = []
