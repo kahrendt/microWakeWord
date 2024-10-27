@@ -22,11 +22,13 @@ from tensorflow.lite.experimental.microfrontend.python.ops import (
 )
 from scipy.io import wavfile
 
-from microwakeword.audio.cGenerateFeatures import generate_features
+# from microwakeword.audio.cGenerateFeatures import generate_features
 
-from silero_vad import load_silero_vad, get_speech_timestamps
+# from silero_vad import load_silero_vad, get_speech_timestamps
 
-model = load_silero_vad()
+# model = load_silero_vad()
+
+from pymicro_features import MicroFrontend
 
 
 
@@ -46,7 +48,33 @@ def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20, use
         audio_samples = (audio_samples * 32767).astype(np.int16)
 
     if use_c:
-        return generate_features(audio_samples)
+        audio_samples = audio_samples.tobytes()
+        micro_frontend = MicroFrontend()
+        # micro_frontend = MicroFrontend(
+        #     tf.convert_to_tensor(audio_samples),
+        #     sample_rate=16000,
+        #     window_size=30,
+        #     window_step=step_ms,
+        #     num_channels=40,
+        #     upper_band_limit=7500,
+        #     lower_band_limit=125,
+        #     enable_pcan=True,
+        #     min_signal_remaining=0.05,
+        #     out_scale=1,
+        #     out_type=tf.uint16,
+        # )
+        features = []
+        audio_idx = 0
+        num_audio_bytes = len(audio_samples)
+        while (audio_idx+160*2 < num_audio_bytes):
+            frontend_result = micro_frontend.ProcessSamples(
+                audio_samples[audio_idx: audio_idx + 160*2]
+            )
+            audio_idx += frontend_result.samples_read * 2
+            if frontend_result.features:
+                features.append(frontend_result.features)
+        
+        return np.array(features).astype(np.float32)
 
     with tf.device("/cpu:0"):
         # The default settings match the TFLM preprocessor settings.
