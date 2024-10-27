@@ -102,6 +102,21 @@ class Augmentation:
                 ir_path=impulse_paths,
             )
 
+        gain_augment = audiomentations.OneOf(
+            transforms=[
+                audiomentations.GainTransition(
+                    p=augmentation_probabilities.get("Gain", 0.0),
+                    min_gain_db=-24,
+                    max_gain_db=0,
+                ),
+                audiomentations.Gain(
+                    p=augmentation_probabilities.get("Gain", 0.0),
+                    min_gain_db=-24,
+                    max_gain_db=0,
+                ),
+            ]
+        )
+
         # Based on openWakeWord's augmentations, accessed on February 23, 2024.
         self.augment = audiomentations.Compose(
             transforms=[
@@ -129,11 +144,12 @@ class Augmentation:
                     max_snr_db=color_max_snr_db,
                 ),
                 background_noise_augment,
-                audiomentations.GainTransition(
-                    p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=-12,
-                    max_gain_in_db=0,
-                ),
+                gain_augment,
+                # audiomentations.GainTransition(
+                #     p=augmentation_probabilities.get("Gain", 0.0),
+                #     min_gain_db=-12,
+                #     max_gain_db=0,
+                # ),
                 reverb_augment,
             ],
             shuffle=False,
@@ -169,12 +185,16 @@ class Augmentation:
         """
         if self.augmented_samples is None:
             return input_audio
-        
+
         if self.augmented_samples < input_audio.shape[0]:
             # Truncate the too long audio by removing the start of the clip
             if self.truncate_randomly:
-                random_start = np.random.randint(0, input_audio.shape[0]-self.augmented_samples)
-                input_audio = input_audio[random_start:random_start+self.augmented_samples]
+                random_start = np.random.randint(
+                    0, input_audio.shape[0] - self.augmented_samples
+                )
+                input_audio = input_audio[
+                    random_start : random_start + self.augmented_samples
+                ]
             else:
                 input_audio = input_audio[-self.augmented_samples :]
         else:
