@@ -22,17 +22,12 @@ from tensorflow.lite.experimental.microfrontend.python.ops import (
 )
 from scipy.io import wavfile
 
-# from microwakeword.audio.cGenerateFeatures import generate_features
-
-# from silero_vad import load_silero_vad, get_speech_timestamps
-
-# model = load_silero_vad()
-
 from pymicro_features import MicroFrontend
 
 
-
-def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20, use_c: bool = True):
+def generate_features_for_clip(
+    audio_samples: np.ndarray, step_ms: int = 20, use_c: bool = True
+):
     """Generates spectrogram features for the given audio data.
 
     Args:
@@ -50,30 +45,17 @@ def generate_features_for_clip(audio_samples: np.ndarray, step_ms: int = 20, use
     if use_c:
         audio_samples = audio_samples.tobytes()
         micro_frontend = MicroFrontend()
-        # micro_frontend = MicroFrontend(
-        #     tf.convert_to_tensor(audio_samples),
-        #     sample_rate=16000,
-        #     window_size=30,
-        #     window_step=step_ms,
-        #     num_channels=40,
-        #     upper_band_limit=7500,
-        #     lower_band_limit=125,
-        #     enable_pcan=True,
-        #     min_signal_remaining=0.05,
-        #     out_scale=1,
-        #     out_type=tf.uint16,
-        # )
         features = []
         audio_idx = 0
         num_audio_bytes = len(audio_samples)
-        while (audio_idx+160*2 < num_audio_bytes):
+        while audio_idx + 160 * 2 < num_audio_bytes:
             frontend_result = micro_frontend.ProcessSamples(
-                audio_samples[audio_idx: audio_idx + 160*2]
+                audio_samples[audio_idx : audio_idx + 160 * 2]
             )
             audio_idx += frontend_result.samples_read * 2
             if frontend_result.features:
                 features.append(frontend_result.features)
-        
+
         return np.array(features).astype(np.float32)
 
     with tf.device("/cpu:0"):
@@ -108,38 +90,6 @@ def save_clip(audio_samples: np.ndarray, output_file: str) -> None:
         audio_samples = (audio_samples * 32767).astype(np.int16)
     wavfile.write(output_file, 16000, audio_samples)
 
-def remove_silence_silero(
-    audio_data: np.ndarray,
-    threshold: float = 0.8,
-    speech_pad_ms: int = 0, # 30,
-    min_silence_duration_ms: int = 100,
-) -> np.ndarray:
-    """ Uses Silero VAD to remove siilence from the audio data
-
-    Args:
-        audio_data (np.ndarray): The input clip's audio samples.
-
-    Returns:
-        np.ndarray: Array with the trimmed audio clip's samples.
-    """
-    integer_type = audio_data.dtype == np.int16
-    if integer_type:
-        audio_data = (audio_data/32767).astype(np.float32)
-    
-    # # Pad to make sure there is enough time after the speech for hte min_silence_duratioN_ms to kick in
-    # audio_data = np.pad(audio_data, (0,int(2*min_silence_duration_ms/1000*16000)), 'constant', constant_values=(0,0))
-        
-    filtered_audio = []    
-    speech_timestamps = get_speech_timestamps(audio_data, model, threshold=threshold, speech_pad_ms=speech_pad_ms, min_silence_duration_ms=min_silence_duration_ms)
-    
-    for timestamp in speech_timestamps:
-        filtered_audio.extend(audio_data[timestamp['start'] : timestamp['end']].tolist())
-    
-    if integer_type:
-        filtered_audio = np.array(filtered_audio*32767).astype(np.int16)
-    else:
-        filtered_audio = np.array(filtered_audio)
-    return filtered_audio
 
 def remove_silence_webrtc(
     audio_data: np.ndarray,
