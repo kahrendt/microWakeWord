@@ -21,3 +21,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/kahrendt/microWakeWord"
 Issues = "https://github.com/kahrendt/microWakeWord/issues"
+
+[tool.black]
+target-version = ["py38", "py39", "py310"]
+exclude = 'generated'

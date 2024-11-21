@@ -99,7 +99,7 @@ def train_model(config, model, data_processor, restore_checkpoint):
     try:
         os.makedirs(config["train_dir"])
         os.mkdir(config["summaries_dir"])
-    except OSError as e:
+    except OSError:
         if restore_checkpoint:
             pass
         else:

@@ -123,7 +123,7 @@ def spectrogram_slices_dropped(flags):
         parse(flags.repeat_in_block),
         parse(flags.mixconv_kernel_sizes),
     ):
-        spectrogram_slices_dropped += (repeat * (max(ksize) - 1))*flags.stride
+        spectrogram_slices_dropped += (repeat * (max(ksize) - 1)) * flags.stride
 
     # spectrogram_slices_dropped *= flags.stride
     return spectrogram_slices_dropped
@@ -275,13 +275,13 @@ def model(flags, shape, batch_size):
     mixconv_kernel_sizes = parse(flags.mixconv_kernel_sizes)
     residual_connections = parse(flags.residual_connection)
 
-    for l in (
+    for list in (
         pointwise_filters,
         repeat_in_block,
         mixconv_kernel_sizes,
         residual_connections,
     ):
-        if len(pointwise_filters) != len(l):
+        if len(pointwise_filters) != len(list):
             raise ValueError("all input lists have to be the same length")
 
     input_audio = tf.keras.layers.Input(

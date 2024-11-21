@@ -165,9 +165,9 @@ def generate_roc_curve(
             index_of_first_viable += 1
 
         x0 = false_accepts_per_hour[index_of_first_viable - 1]
-        y0 = false_rejections[index_of_first_viable-1]
+        y0 = false_rejections[index_of_first_viable - 1]
         x1 = false_accepts_per_hour[index_of_first_viable]
-        y1 = false_rejections[index_of_first_viable-1]
+        y1 = false_rejections[index_of_first_viable - 1]
 
         fnr_at_max_faph = (y0 * (x1 - 2.0) + y1 * (2.0 - x0)) / (x1 - x0)
         cutoff_at_max_faph = (
@@ -299,7 +299,7 @@ def tflite_streaming_model_roc(
     tflite_model_name="stream_state_internal.tflite",
     accuracy_name="tflite_streaming_roc.txt",
     sliding_window_length=5,
-    ignore_slices_after_accept = 25,
+    ignore_slices_after_accept=25,
 ):
     """Function to test a tflite model false accepts per hour and false rejection rates.
 
@@ -334,7 +334,9 @@ def tflite_streaming_model_roc(
     ambient_streaming_probabilities = []
     for spectrogram_track in test_ambient_fingerprints:
         streaming_probabilities = model.predict_spectrogram(spectrogram_track)
-        sliding_window_probabilities = sliding_window_view(streaming_probabilities, sliding_window_length)
+        sliding_window_probabilities = sliding_window_view(
+            streaming_probabilities, sliding_window_length
+        )
         moving_average = sliding_window_probabilities.mean(axis=-1)
         ambient_streaming_probabilities.append(moving_average)
 
@@ -342,7 +344,11 @@ def tflite_streaming_model_roc(
     # ignore_slices_after_accept = 25
 
     faph = compute_false_accepts_per_hour(
-        ambient_streaming_probabilities, cutoffs, ignore_slices_after_accept, stride=config['stride'], step_s = config["window_step_ms"]/1000
+        ambient_streaming_probabilities,
+        cutoffs,
+        ignore_slices_after_accept,
+        stride=config["stride"],
+        step_s=config["window_step_ms"] / 1000,
     )
 
     test_fingerprints, test_ground_truth, _ = audio_processor.get_data(
@@ -360,7 +366,8 @@ def tflite_streaming_model_roc(
             # Only test positive samples
             streaming_probabilities = model.predict_spectrogram(test_fingerprints[i])
             sliding_window_probabilities = sliding_window_view(
-                streaming_probabilities[ignore_slices_after_accept:], sliding_window_length
+                streaming_probabilities[ignore_slices_after_accept:],
+                sliding_window_length,
             )
             moving_average = sliding_window_probabilities.mean(axis=-1)
             positive_sample_streaming_probabilities.append(np.max(moving_average))

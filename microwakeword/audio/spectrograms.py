@@ -15,8 +15,6 @@
 
 import numpy as np
 
-from typing import Optional
-
 from microwakeword.audio.audio_utils import generate_features_for_clip
 from microwakeword.audio.augmentation import Augmentation
 from microwakeword.audio.clips import Clips

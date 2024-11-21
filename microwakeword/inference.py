@@ -97,8 +97,10 @@ class Model:
 
         # Slice the input data into the required number of chunks
         chunks = []
-        for last_index in range(self.input_feature_slices, len(spectrogram)+1, self.stride):
-            chunk = spectrogram[last_index-self.input_feature_slices : last_index]
+        for last_index in range(
+            self.input_feature_slices, len(spectrogram) + 1, self.stride
+        ):
+            chunk = spectrogram[last_index - self.input_feature_slices : last_index]
             if len(chunk) == self.input_feature_slices:
                 chunks.append(chunk)
 
@@ -157,7 +159,7 @@ class Model:
             numpy.ndarray: dequantized data as float32 dtype
         """
         output_quantization_parameters = output_details["quantization_parameters"]
-        output_scale = output_quantization_parameters["scales"][0]
+        output_scale = 255.0  # assume (u)int8 quantization
         output_zero_point = output_quantization_parameters["zero_points"][0]
         # Caveat: tflm_output_quant need to be converted to float to avoid integer
         # overflow during dequantization
@@ -165,4 +167,4 @@ class Model:
         # (tflm_output_quant + (-output_zero_point))
         # can produce different results (int8 calculation)
         # return output_scale * (data.astype(np.float32) - output_zero_point)
-        return 1/255.0 * (data.astype(np.float32) - output_zero_point)
+        return 1 / output_scale * (data.astype(np.float32) - output_zero_point)
