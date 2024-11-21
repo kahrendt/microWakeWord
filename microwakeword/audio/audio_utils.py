@@ -33,6 +33,11 @@ def generate_features_for_clip(
     Args:
         audio_samples (numpy.ndarray): The clip's audio samples.
         step_ms (int, optional): The window step size in ms. Defaults to 20.
+        use_c (bool, optional): Whether to use the C implementation of the microfrontend via pymicro-features. Defaults to True.
+
+    Raises:
+        ValueError: If the provided audio data is not a 16-bit integer array.
+
 
     Returns:
         numpy.ndarray: The spectrogram features for the provided audio clip.

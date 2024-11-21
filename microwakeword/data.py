@@ -15,7 +15,6 @@
 
 """Functions and classes for loading/augmenting spectrograms"""
 
-import copy
 import os
 import random
 
@@ -517,10 +516,10 @@ class FeatureHandler(object):
             truncation_strategy (str): how to truncate spectrograms longer than `features_length`
             augmentation_policy (dict): dictionary that specifies augmentation settings. It has the following keys:
                 freq_mix_prob: probability that FreqMix is applied
-                time_mask_max_size: maximum size of time feature masks for SpecAugment
+                time_mask_max_size: maximum size of time masks for SpecAugment
                 time_mask_count: the total number of separate time masks applied for SpecAugment
                 freq_mask_max_size: maximum size of frequency feature masks for SpecAugment
-                time_mask_count: the total number of separate feature masks applied for SpecAugment
+                freq_mask_count: the total number of separate feature masks applied for SpecAugment
 
         Returns:
             data: spectrograms in a NumPy array (or as a list if in mode is `*_ambient`)

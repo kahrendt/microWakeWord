@@ -33,6 +33,7 @@ class Augmentation:
         background_max_snr_db (int, optional): The maximum signal to noise ratio for mixing in background audio. Defaults to 10.
         min_jitter_s (float, optional): The minimum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
         max_jitter_s (float, optional): The maximum duration in seconds that the original clip is positioned before the end of the augmented audio.. Defaults to 0.0.
+        truncate_randomly: (bool, option): If true, the clip is truncated to the specified duration randomly. Otherwise, the start of the clip is truncated.
     """
 
     def __init__(
@@ -145,11 +146,6 @@ class Augmentation:
                 ),
                 background_noise_augment,
                 gain_augment,
-                # audiomentations.GainTransition(
-                #     p=augmentation_probabilities.get("Gain", 0.0),
-                #     min_gain_db=-12,
-                #     max_gain_db=0,
-                # ),
                 reverb_augment,
             ],
             shuffle=False,

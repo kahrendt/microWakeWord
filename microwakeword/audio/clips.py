@@ -39,6 +39,8 @@ class Clips:
         remove_silence (bool, optional): Use webrtcvad to trim non-voice activity in the clip. Defaults to False.
         random_split_seed (int | None, optional): The random seed used to split the clips into different sets. Set to None to disable splitting the clips. Defaults to None.
         split_count (int | float, optional): The percentage/count of clips to be included in the testing and validation sets. Defaults to 0.1.
+        trimmed_clip_duration_s: (float | None, optional): The duration of the clips to trim the end of long clips. Set to None to disable trimming. Defaults to None.
+        trim_zerios: (bool, optional): If true, any leading and trailling zeros are removed. Defaults to false.
     """
 
     def __init__(
