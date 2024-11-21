@@ -106,12 +106,12 @@ class Augmentation:
             transforms=[
                 audiomentations.GainTransition(
                     p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=-24,
+                    min_gain_db=-30,
                     max_gain_db=0,
                 ),
                 audiomentations.Gain(
                     p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=-24,
+                    min_gain_db=-30,
                     max_gain_db=0,
                 ),
             ]
