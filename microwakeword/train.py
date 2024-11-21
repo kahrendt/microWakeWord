@@ -329,8 +329,8 @@ def train(model, config, data_processor):
                     "precision", nonstreaming_metrics["precision"], step=training_step
                 )
                 tf.summary.scalar(
-                    "faph",
-                    nonstreaming_metrics["ambient_false_positives_per_hour"],
+                    "recall_at_no_faph",
+                    nonstreaming_metrics["recall_at_no_faph"],
                     step=training_step,
                 )
                 tf.summary.scalar(
