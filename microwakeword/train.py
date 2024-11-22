@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import os
+import platform
 
 from absl import logging
 
@@ -180,7 +181,10 @@ def train(model, config, data_processor):
     pad_list_with_last_entry(negative_class_weight_list, training_step_iterations)
 
     loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
-    optimizer = tf.keras.optimizers.legacy.Adam()
+    if platform.system() == "Darwin" and platform.processor() == "arm":
+        optimizer = tf.keras.optimizers.legacy.Adam()
+    else:
+        optimizer = tf.keras.optimizers.Adam()
 
     cutoffs = np.linspace(0.0, 1.0, 101).tolist()
 
