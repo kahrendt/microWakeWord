@@ -35,7 +35,7 @@ The streaming model performs inferences every 30 ms, where the initial convoluti
 
 We generate samples using [Piper sample generator](https://github.com/rhasspy/piper-sample-generator).
 
-The generated samples are augmented before or during training to increase variability. There are precomputed spectrogram features for various negative datasets available on [Hugging Face](https://huggingface.co/datasets/kahrendt/microwakeword).
+The generated samples are augmented before or during training to increase variability. There are pre-generated spectrogram features for various negative datasets available on [Hugging Face](https://huggingface.co/datasets/kahrendt/microwakeword).
 
 Please see the ``basic_training_notebook.ipynb`` notebook to see how a model is trained. This notebook will produce a model, but it will most likely not be usable! Training a usable model requires a lot of experimentation, and that notebook is meant to serve only as a starting point for advanced users.
 
