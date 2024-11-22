@@ -2,7 +2,7 @@
 
 microWakeWord is an open-source wakeword library for detecting custom wake words on low power devices. It produces models that are suitable for using [TensorFlow Lite for Microcontrollers](https://www.tensorflow.org/lite/microcontrollers). The models are suitable for real-world usage with low false accept and false reject rates.
 
-**microWakeword is currently available as an early release intended for expert users. Training a model that works well is still very difficult, as it typically requires thorough experimentation with hyperparameters and sample generation settings. Please share any insights you find for training a good model!**
+**microWakeword is currently available as an early release. Training new models is intended for advanced users. Training a model that works well is still very difficult, as it typically requires experimentation with hyperparameters and sample generation settings. Please share any insights you find for training a good model!**
 
 ## Detection Process
 
@@ -37,9 +37,11 @@ We generate samples using [Piper sample generator](https://github.com/rhasspy/pi
 
 The generated samples are augmented before or during training to increase variability. There are precomputed spectrogram features for various negative datasets available on [Hugging Face](https://huggingface.co/datasets/kahrendt/microwakeword).
 
-Please see the ``feature_generation.ipynb`` notebook on how to get started with downloading some background datasets and how to augment clips.
+Please see the ``basic_training_notebook.ipynb`` notebook to see how a model is trained. This notebook will produce a model, but it will most likely not be usable! Training a usable model requires a lot of experimentation, and that notebook is meant to serve only as a starting point for advanced users.
 
-Please see the ``training_notebook.ipynb`` notebook to see how a model is trained.
+## Models
+
+See https://github.com/esphome/micro-wake-word-models to download the currently available models.
 
 ## Acknowledgements
 
