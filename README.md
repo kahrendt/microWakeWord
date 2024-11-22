@@ -1,4 +1,4 @@
-# microWakeWord
+![microWakeWord logo](etc/logo.png)
 
 microWakeWord is an open-source wakeword library for detecting custom wake words on low power devices. It produces models that are suitable for using [TensorFlow Lite for Microcontrollers](https://www.tensorflow.org/lite/microcontrollers). The models are suitable for real-world usage with low false accept and false reject rates.
 
@@ -74,7 +74,7 @@ The streaming model performs inferences every 20 ms on the newest audio stride. 
 
 ## Model Training Process
 
-We generate positive and negative samples using [openWakeWord](https://github.com/dscripka/openWakeWord), which relies on [Piper sample generator](https://github.com/rhasspy/piper-sample-generator). 
+We generate positive and negative samples using [openWakeWord](https://github.com/dscripka/openWakeWord), which relies on [Piper sample generator](https://github.com/rhasspy/piper-sample-generator).
 
 The generated samples are augmented while training to increase variability. There are precomputed spectrogram features for various negative datasets available on [Hugging Face](https://huggingface.co/datasets/kahrendt/microwakeword).
 
