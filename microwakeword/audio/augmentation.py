@@ -31,8 +31,10 @@ class Augmentation:
         background_paths (List[str], optional): List of directory paths that contain audio clips to be mixed into the audio clip. If the list is empty, then the background augmentation is not applied. Defaults to [].
         background_min_snr_db (int, optional): The minimum signal to noise ratio for mixing in background audio. Defaults to -10.
         background_max_snr_db (int, optional): The maximum signal to noise ratio for mixing in background audio. Defaults to 10.
+        min_gain_db (float, optional): The minimum gain for the gain augmentation. Defaults to -45.0.
+        max_gain_db (float, optional): The mmaximum gain for the gain augmentation. Defaults to 0.0.
         min_jitter_s (float, optional): The minimum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
-        max_jitter_s (float, optional): The maximum duration in seconds that the original clip is positioned before the end of the augmented audio.. Defaults to 0.0.
+        max_jitter_s (float, optional): The maximum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
         truncate_randomly: (bool, option): If true, the clip is truncated to the specified duration randomly. Otherwise, the start of the clip is truncated.
     """
 
@@ -55,6 +57,8 @@ class Augmentation:
         background_max_snr_db: int = 10,
         color_min_snr_db: int = 10,
         color_max_snr_db: int = 30,
+        min_gain_db: float = -45,
+        max_gain_db: float = 0,
         min_jitter_s: float = 0.0,
         max_jitter_s: float = 0.0,
         truncate_randomly: bool = False,
@@ -107,13 +111,13 @@ class Augmentation:
             transforms=[
                 audiomentations.GainTransition(
                     p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=-30,
-                    max_gain_db=0,
+                    min_gain_db=min_gain_db,
+                    max_gain_db=max_gain_db,
                 ),
                 audiomentations.Gain(
                     p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=-30,
-                    max_gain_db=0,
+                    min_gain_db=min_gain_db,
+                    max_gain_db=max_gain_db,
                 ),
             ]
         )
