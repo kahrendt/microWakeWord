@@ -75,7 +75,7 @@ def fixed_length_spectrogram(
     spectrogram: np.ndarray,
     features_length: int,
     truncation_strategy: str = "random",
-    fixed_right_cutoff: int = 0,
+    right_cutoff: int = 0,
 ):
     """Returns a spectrogram with specified length. Pads with zeros at the start if too short. Removes feature windows following ``truncation_strategy`` if too long.
 
@@ -92,6 +92,7 @@ def fixed_length_spectrogram(
     Returns:
         numpy.ndarry: The fixed length spectrogram due to padding or truncation.
     """
+
     data_length = spectrogram.shape[0]
     features_offset = 0
     if data_length > features_length:
@@ -105,7 +106,7 @@ def fixed_length_spectrogram(
         elif truncation_strategy == "truncate_end":
             features_offset = 0
         elif truncation_strategy == "fixed_right_cutoff":
-            features_offset = data_length - features_length - fixed_right_cutoff
+            features_offset = data_length - features_length - right_cutoff
     else:
         pad_slices = features_length - data_length
 
@@ -133,6 +134,7 @@ class MmapFeatureGenerator(object):
         truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
         stride (int): The stride in the model's first layer.
         step (float): The window step duration (in seconds).
+        fixed_right_cutoffs (list[int]): List of spectogram slices to cutoff on the right if the truncation strategy is "fixed_right_cutoff". In training mode, its randomly chosen from the list. Otherwise, it yields spectrograms with all cutoffs in the list.
     """
 
     def __init__(
@@ -144,13 +146,13 @@ class MmapFeatureGenerator(object):
         truncation_strategy: str,
         stride: int,
         step: float,
-        fixed_right_cutoff: int = 0,
+        fixed_right_cutoffs: list[int] = [0],
     ):
         self.label = float(label)
         self.sampling_weight = sampling_weight
         self.penalty_weight = penalty_weight
         self.truncation_strategy = truncation_strategy
-        self.fixed_right_cutoff = fixed_right_cutoff
+        self.fixed_right_cutoffs = fixed_right_cutoffs
 
         self.stride = stride
         self.step = step
@@ -243,11 +245,12 @@ class MmapFeatureGenerator(object):
         Returns:
             numpy.ndarray: A random spectrogram of specified length after truncation.
         """
-
-        fixed_right_cutoff = self.fixed_right_cutoff
+        right_cutoff = 0
         if truncation_strategy == "default":
             truncation_strategy = self.truncation_strategy
-            fixed_right_cutoff = 0
+
+        if truncation_strategy == "fixed_right_cutoff":
+            right_cutoff = random.choice(self.fixed_right_cutoffs)
 
         feature = random.choice(self.feature_sets[mode])
         spectrogram = self.loaded_features[feature["loaded_feature_index"]][
@@ -258,7 +261,7 @@ class MmapFeatureGenerator(object):
             spectrogram,
             features_length,
             truncation_strategy,
-            fixed_right_cutoff,
+            right_cutoff,
         )
 
         # Spectrograms with type np.uint16 haven't been scaled
@@ -272,7 +275,6 @@ class MmapFeatureGenerator(object):
         mode,
         features_length,
         truncation_strategy="default",
-        fixed_right_cutoff: int = 0,
     ):
         """A Python generator that yields spectrograms from the specified mode of specified length after truncation.
 
@@ -308,14 +310,15 @@ class MmapFeatureGenerator(object):
 
                     yield split_spectrogram
             else:
-                spectrogram = fixed_length_spectrogram(
-                    spectrogram,
-                    features_length,
-                    truncation_strategy,
-                    fixed_right_cutoff,
-                )
+                for cutoff in self.fixed_right_cutoffs:
+                    fixed_spectrogram = fixed_length_spectrogram(
+                        spectrogram,
+                        features_length,
+                        truncation_strategy,
+                        cutoff,
+                    )
 
-                yield spectrogram
+                    yield fixed_spectrogram
 
 
 class ClipsHandlerWrapperGenerator(object):
@@ -358,9 +361,7 @@ class ClipsHandlerWrapperGenerator(object):
         else:
             return 0
 
-    def get_random_spectrogram(
-        self, mode, features_length, truncation_strategy, fixed_right_cutoff: int = 0
-    ):
+    def get_random_spectrogram(self, mode, features_length, truncation_strategy):
         """Retrieves a random spectrogram from the specified mode with specified length after truncation.
 
         Args:
@@ -381,7 +382,7 @@ class ClipsHandlerWrapperGenerator(object):
             spectrogram,
             features_length,
             truncation_strategy,
-            fixed_right_cutoff,
+            right_cutoff=0,
         )
 
         # Spectrograms with type np.uint16 haven't been scaled
@@ -427,7 +428,7 @@ class FeatureHandler(object):
                         feature_set["truncation_strategy"],
                         stride=config["stride"],
                         step=config["window_step_ms"] / 1000.0,
-                        fixed_right_cutoff=feature_set.get("fixed_right_cutoff", 0),
+                        fixed_right_cutoffs=feature_set.get("fixed_right_cutoffs", [0]),
                     )
                 )
             elif feature_set["type"] == "clips":
