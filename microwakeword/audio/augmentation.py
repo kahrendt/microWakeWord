@@ -139,15 +139,15 @@ class Augmentation:
                     max_snr_db=color_max_snr_db,
                 ),
                 background_noise_augment,
-                audiomentations.GainTransition(
-                    p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=min_gain_transition_db,
-                    max_gain_db=max_gain_transition_db,
-                ),
                 audiomentations.Gain(
                     p=augmentation_probabilities.get("Gain", 0.0),
                     min_gain_db=min_gain_db,
                     max_gain_db=max_gain_db,
+                ),
+                audiomentations.GainTransition(
+                    p=augmentation_probabilities.get("GainTransition", 0.0),
+                    min_gain_db=min_gain_transition_db,
+                    max_gain_db=max_gain_transition_db,
                 ),
                 reverb_augment,
                 audiomentations.Compose(
