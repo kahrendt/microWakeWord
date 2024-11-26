@@ -26,13 +26,15 @@ class Augmentation:
 
     Args:
         augmentation_duration_s (float): The duration of the augmented clip in seconds.
-        augmentation_probabilities (dict, optional): Dictionary that specifies each augmentation's probability of being applied. Defaults to { "SevenBandParametricEQ": 0.0, "TanhDistortion": 0.0, "PitchShift": 0.0, "BandStopFilter": 0.0, "AddColorNoise": 0.25, "AddBackgroundNoise": 0.75, "Gain": 1.0, "RIR": 0.5, }.
+        augmentation_probabilities (dict, optional): Dictionary that specifies each augmentation's probability of being applied. Defaults to { "SevenBandParametricEQ": 0.0, "TanhDistortion": 0.0, "PitchShift": 0.0, "BandStopFilter": 0.0, "AddColorNoise": 0.25, "AddBackgroundNoise": 0.75, "Gain": 1.0, "GainTransition": 0.25, "RIR": 0.5, }.
         impulse_paths (List[str], optional): List of directory paths that contain room impulse responses that the audio clip is reverberated with. If the list is empty, then reverberation is not applied. Defaults to [].
         background_paths (List[str], optional): List of directory paths that contain audio clips to be mixed into the audio clip. If the list is empty, then the background augmentation is not applied. Defaults to [].
         background_min_snr_db (int, optional): The minimum signal to noise ratio for mixing in background audio. Defaults to -10.
         background_max_snr_db (int, optional): The maximum signal to noise ratio for mixing in background audio. Defaults to 10.
         min_gain_db (float, optional): The minimum gain for the gain augmentation. Defaults to -45.0.
         max_gain_db (float, optional): The mmaximum gain for the gain augmentation. Defaults to 0.0.
+        min_gain_transition_db (float, optional): The minimum gain for the gain transition augmentation. Defaults to -10.0.
+        max_gain_transition_db (float, optional): The mmaximum gain for the gain transition augmentation. Defaults to 10.0.
         min_jitter_s (float, optional): The minimum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
         max_jitter_s (float, optional): The maximum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
         truncate_randomly: (bool, option): If true, the clip is truncated to the specified duration randomly. Otherwise, the start of the clip is truncated.
@@ -49,6 +51,7 @@ class Augmentation:
             "AddColorNoise": 0.25,
             "AddBackgroundNoise": 0.75,
             "Gain": 1.0,
+            "GainTransition": 0.25,
             "RIR": 0.5,
         },
         impulse_paths: List[str] = [],
@@ -59,6 +62,8 @@ class Augmentation:
         color_max_snr_db: int = 30,
         min_gain_db: float = -45,
         max_gain_db: float = 0,
+        min_gain_transition_db: float = -10,
+        max_gain_transition_db: float = 10,
         min_jitter_s: float = 0.0,
         max_jitter_s: float = 0.0,
         truncate_randomly: bool = False,
@@ -107,21 +112,6 @@ class Augmentation:
                 ir_path=impulse_paths,
             )
 
-        gain_augment = audiomentations.OneOf(
-            transforms=[
-                audiomentations.GainTransition(
-                    p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=min_gain_db,
-                    max_gain_db=max_gain_db,
-                ),
-                audiomentations.Gain(
-                    p=augmentation_probabilities.get("Gain", 0.0),
-                    min_gain_db=min_gain_db,
-                    max_gain_db=max_gain_db,
-                ),
-            ]
-        )
-
         # Based on openWakeWord's augmentations, accessed on February 23, 2024.
         self.augment = audiomentations.Compose(
             transforms=[
@@ -149,8 +139,24 @@ class Augmentation:
                     max_snr_db=color_max_snr_db,
                 ),
                 background_noise_augment,
-                gain_augment,
+                audiomentations.GainTransition(
+                    p=augmentation_probabilities.get("Gain", 0.0),
+                    min_gain_db=min_gain_transition_db,
+                    max_gain_db=max_gain_transition_db,
+                ),
+                audiomentations.Gain(
+                    p=augmentation_probabilities.get("Gain", 0.0),
+                    min_gain_db=min_gain_db,
+                    max_gain_db=max_gain_db,
+                ),
                 reverb_augment,
+                audiomentations.Compose(
+                    transforms=[
+                        audiomentations.Normalize(
+                            apply_to="only_too_loud_sounds", p=1.0
+                        )
+                    ]
+                ),  # If the audio is clipped, normalize
             ],
             shuffle=False,
         )
@@ -222,13 +228,6 @@ class Augmentation:
                 "ignore"
             )  # Suppresses warning about background clip being too quiet... TODO: find better approach!
             output_audio = self.augment(input_audio, sample_rate=16000)
-
-        if np.max(np.abs(output_audio) > 1):
-            # If the audio is clipped, normalize
-            norm_augment = audiomentations.Compose(
-                transforms=[audiomentations.Normalize(p=1.0)]
-            )
-            output_audio = norm_augment(output_audio, sample_rate=16000)
 
         return output_audio
 
