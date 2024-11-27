@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "microwakeword"
-version = "0.0.1"
+version = "0.1.0"
 authors = [
   { name="Kevin Ahrendt", email="kahrendt@gmail.com" },
 ]
 description = "A TensorFlow based wake word detection training framework using synthetic sample generation suitable for certain microcontrollers."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10, <3.11"
 dynamic = ["dependencies"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -23,5 +23,5 @@ Homepage = "https://github.com/kahrendt/microWakeWord"
 Issues = "https://github.com/kahrendt/microWakeWord/issues"
 
 [tool.black]
-target-version = ["py38", "py39", "py310"]
+target-version = ["py310"]
 exclude = 'generated'
