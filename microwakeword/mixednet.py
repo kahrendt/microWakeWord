@@ -20,6 +20,7 @@ from microwakeword.layers import strided_drop
 
 import ast
 import tensorflow as tf
+from tensorflow.keras.layers import Lambda
 
 
 def parse(text):
@@ -193,7 +194,7 @@ class MixConv(object):
 
         filters = _get_shape_value(net.shape[self._channel_axis])
         splits = _split_channels(filters, len(self.kernel_sizes))
-        x_splits = tf.split(net, splits, self._channel_axis)
+        x_splits = Lambda(lambda x: tf.split(x, splits, axis=self._channel_axis))(net)
 
         x_outputs = []
         for x, ks in zip(x_splits, self.kernel_sizes):
@@ -208,7 +209,7 @@ class MixConv(object):
             features_drop = output.shape[1] - x_outputs[-1].shape[1]
             x_outputs[i] = strided_drop.StridedDrop(features_drop)(output)
 
-        x = tf.concat(x_outputs, self._channel_axis)
+        x = tf.keras.layers.concatenate(x_outputs, axis=self._channel_axis)
         return x
 
 
@@ -291,7 +292,7 @@ def model(flags, shape, batch_size):
     net = input_audio
 
     # make it [batch, time, 1, feature]
-    net = tf.keras.backend.expand_dims(net, axis=2)
+    net = tf.keras.ops.expand_dims(net, axis=2)
 
     # Streaming Conv2D with 'valid' padding
     if flags.first_conv_filters > 0:

@@ -181,10 +181,7 @@ def train(model, config, data_processor):
     pad_list_with_last_entry(negative_class_weight_list, training_step_iterations)
 
     loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
-    if platform.system() == "Darwin" and platform.processor() == "arm":
-        optimizer = tf.keras.optimizers.legacy.Adam()
-    else:
-        optimizer = tf.keras.optimizers.Adam()
+    optimizer = tf.keras.optimizers.Adam()
 
     cutoffs = np.linspace(0.0, 1.0, 101).tolist()
 
@@ -238,7 +235,7 @@ def train(model, config, data_processor):
                 negative_class_weight = negative_class_weight_list[i]
                 break
 
-        tf.keras.backend.set_value(model.optimizer.lr, learning_rate)
+        model.optimizer.learning_rate.assign(learning_rate)
 
         augmentation_policy = {
             "mix_up_prob": mix_up_prob,

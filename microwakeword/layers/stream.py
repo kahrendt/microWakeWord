@@ -572,7 +572,7 @@ class Stream(tf.keras.layers.Layer):
                 memory = self.states[:, 1 : self.ring_buffer_size_in_time_dim, :]
 
                 # add new row [batch_size, memory_size, feature_dim, channel]
-                memory = tf.keras.backend.concatenate([memory, inputs], 1)
+                memory = tf.keras.layers.concatenate([memory, inputs], 1)
 
                 assign_states = self.states.assign(memory)
 
@@ -581,7 +581,7 @@ class Stream(tf.keras.layers.Layer):
             else:
                 # add new row [batch_size, memory_size, feature_dim, channel]
                 if self.ring_buffer_size_in_time_dim:
-                    memory = tf.keras.backend.concatenate([self.states, inputs], 1)
+                    memory = tf.keras.layers.concatenate([self.states, inputs], 1)
 
                     state_update = memory[
                         :, -self.ring_buffer_size_in_time_dim :, :
@@ -636,13 +636,13 @@ class Stream(tf.keras.layers.Layer):
                 memory = state[:, 1 : self.ring_buffer_size_in_time_dim, :]
 
                 # add new row [batch_size, memory_size, feature_dim, channel]
-                memory = tf.keras.backend.concatenate([memory, inputs], 1)
+                memory = tf.keras.layers.concatenate([memory, inputs], 1)
 
                 output = self.cell(memory)
                 return output, memory
             else:
                 # add new row [batch_size, memory_size, feature_dim, channel]
-                memory = tf.keras.backend.concatenate([state, inputs], 1)
+                memory = tf.keras.layers.concatenate([state, inputs], 1)
 
                 state_update = memory[
                     :, -self.ring_buffer_size_in_time_dim :, :

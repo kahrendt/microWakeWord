@@ -112,7 +112,7 @@ class Delay(tf.keras.layers.Layer):
         return config
 
     def _streaming_internal_state(self, inputs):
-        memory = tf.keras.backend.concatenate([self.states, inputs], 1)
+        memory = tf.keras.layers.concatenate([self.states, inputs], 1)
         outputs = memory[:, : inputs.shape.as_list()[1]]
         new_memory = memory[:, -self.delay :]
         assign_states = self.states.assign(new_memory)
@@ -121,7 +121,7 @@ class Delay(tf.keras.layers.Layer):
             return tf.identity(outputs)
 
     def _streaming_external_state(self, inputs, states):
-        memory = tf.keras.backend.concatenate([states, inputs], 1)
+        memory = tf.keras.layers.concatenate([states, inputs], 1)
         outputs = memory[:, : inputs.shape.as_list()[1]]
         new_memory = memory[:, -self.delay :]
         return outputs, new_memory
