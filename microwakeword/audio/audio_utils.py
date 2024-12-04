@@ -45,7 +45,7 @@ def generate_features_for_clip(
 
     # Convert any float formatted audio data to an int16 array
     if audio_samples.dtype in (np.float32, np.float64):
-        audio_samples = (audio_samples * 32767).astype(np.int16)
+        audio_samples = np.clip((audio_samples * 32768), -32768, 32767).astype(np.int16)
 
     if use_c:
         audio_samples = audio_samples.tobytes()
