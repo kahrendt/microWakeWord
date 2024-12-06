@@ -20,7 +20,8 @@ from microwakeword.layers import strided_drop
 
 import ast
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda
+from tensorflow.keras.layers import Layer
+
 
 
 def parse(text):
@@ -147,6 +148,25 @@ def _get_shape_value(maybe_v2_shape):
         return maybe_v2_shape.value
 
 
+class ChannelSplit(Layer):
+    def __init__(self, splits, axis=-1, **kwargs):
+        super().__init__(**kwargs)
+        self.splits = splits
+        self.axis = axis
+
+    def call(self, inputs):
+        return tf.split(inputs, self.splits, axis=self.axis)
+
+    def compute_output_shape(self, input_shape):
+        output_shapes = []
+        for split in self.splits:
+            new_shape = list(input_shape)
+            new_shape[self.axis] = split
+            output_shapes.append(tuple(new_shape))
+        return output_shapes
+
+
+
 class MixConv(object):
     """MixConv with mixed depthwise convolutional kernels.
 
@@ -194,7 +214,7 @@ class MixConv(object):
 
         filters = _get_shape_value(net.shape[self._channel_axis])
         splits = _split_channels(filters, len(self.kernel_sizes))
-        x_splits = Lambda(lambda x: tf.split(x, splits, axis=self._channel_axis))(net)
+        x_splits = ChannelSplit(splits, axis=self._channel_axis)(net)
 
         x_outputs = []
         for x, ks in zip(x_splits, self.kernel_sizes):

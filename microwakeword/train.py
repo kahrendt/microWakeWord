@@ -22,6 +22,8 @@ from absl import logging
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.python.util import tf_decorator
+
 
 def validate_nonstreaming(config, data_processor, model, test_set):
     testing_fingerprints, testing_ground_truth, _ = data_processor.get_data(
@@ -30,16 +32,14 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         features_length=config["spectrogram_length"],
         truncation_strategy="truncate_start",
     )
-
-    test_batch_size = 1024
+    testing_ground_truth = testing_ground_truth.reshape(-1, 1)
 
     model.reset_metrics()
-    for i in range(0, len(testing_fingerprints), test_batch_size):
-        result = model.test_on_batch(
-            testing_fingerprints[i : i + test_batch_size],
-            testing_ground_truth[i : i + test_batch_size],
-            reset_metrics=False,
-        )
+
+    result = model.evaluate(
+        testing_fingerprints,
+        testing_ground_truth,
+    )
 
     metrics = {}
     metrics["accuracy"] = result[1]
@@ -67,13 +67,12 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             features_length=config["spectrogram_length"],
             truncation_strategy="split",
         )
+        ambient_testing_ground_truth = ambient_testing_ground_truth.reshape(-1, 1)
 
-        for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
-            ambient_predictions = model.test_on_batch(
-                ambient_testing_fingerprints[i : i + test_batch_size],
-                ambient_testing_ground_truth[i : i + test_batch_size],
-                reset_metrics=False,
-            )
+        ambient_predictions = model.evaluate(
+            ambient_testing_fingerprints,
+            ambient_testing_ground_truth,
+        )
 
         duration_of_ambient_set = (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
@@ -140,7 +139,6 @@ def validate_nonstreaming(config, data_processor, model, test_set):
 
 
 def train(model, config, data_processor):
-
     # Assign default training settings if not set in the configuration yaml
     if not (training_steps_list := config.get("training_steps")):
         training_steps_list = [20000]
@@ -198,6 +196,10 @@ def train(model, config, data_processor):
     ]
 
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+    # We un-decorate the `tf.function`, it's very slow to manually run training batches
+    model.make_train_function()
+    _, model.train_function = tf_decorator.unwrap(model.train_function)
 
     # Configure checkpointer and restore if available
     checkpoint_directory = os.path.join(config["train_dir"], "restore/")
@@ -258,14 +260,17 @@ def train(model, config, data_processor):
             augmentation_policy=augmentation_policy,
         )
 
+        train_ground_truth = train_ground_truth.reshape(-1, 1)
+
         class_weights = {0: negative_class_weight, 1: positive_class_weight}
+        combined_weights = train_sample_weights * np.vectorize(class_weights.get)(
+            train_ground_truth
+        )
 
         result = model.train_on_batch(
             train_fingerprints,
             train_ground_truth,
-            sample_weight=train_sample_weights,
-            class_weight=class_weights,
-            reset_metrics=False,
+            sample_weight=combined_weights,
         )
 
         # Print the running statistics in the current validation epoch
@@ -303,7 +308,9 @@ def train(model, config, data_processor):
                 tf.summary.scalar("auc", result[8], step=training_step)
                 train_writer.flush()
 
-            model.save_weights(os.path.join(config["train_dir"], "last_weights"))
+            model.save_weights(
+                os.path.join(config["train_dir"], "last_weights.weights.h5")
+            )
 
             nonstreaming_metrics = validate_nonstreaming(
                 config, data_processor, model, "validation"
@@ -359,10 +366,8 @@ def train(model, config, data_processor):
             model.save_weights(
                 os.path.join(
                     config["train_dir"],
-                    "train/",
-                    str(int(best_minimization_quantity * 10000))
-                    + "weights_"
-                    + str(training_step),
+                    "train"
+                    f"{int(best_minimization_quantity * 10000)}_weights_{training_step}.weights.h5",
                 )
             )
 
@@ -413,7 +418,7 @@ def train(model, config, data_processor):
                 best_no_faph_cutoff = current_no_faph_cutoff
 
                 # overwrite the best model weights
-                model.save_weights(os.path.join(config["train_dir"], "best_weights"))
+                model.save_weights(os.path.join(config["train_dir"], "best_weights.weights.h5"))
                 checkpoint.save(file_prefix=checkpoint_prefix)
 
             logging.info(
@@ -425,4 +430,4 @@ def train(model, config, data_processor):
 
     # Save checkpoint after training
     checkpoint.save(file_prefix=checkpoint_prefix)
-    model.save_weights(os.path.join(config["train_dir"], "last_weights"))
+    model.save_weights(os.path.join(config["train_dir"], "last_weights.weights.h5"))

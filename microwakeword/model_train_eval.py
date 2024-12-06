@@ -410,8 +410,8 @@ if __name__ == "__main__":
         )
 
         model.load_weights(
-            os.path.join(config["train_dir"], flags.use_weights)
-        ).expect_partial()
+            os.path.join(config["train_dir"], flags.use_weights) + ".weights.h5"
+        )
 
         logging.info(model.summary())
 

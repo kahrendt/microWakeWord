@@ -177,14 +177,6 @@ def convert_to_inference_model(model, input_tensors, mode):
                 "got a `Sequential` instance instead:",
                 model,
             )
-        # pylint: disable=protected-access
-        if not model._is_graph_network:
-            raise ValueError(
-                "Expected `model` argument "
-                "to be a functional `Model` instance, "
-                "but got a subclass model instead."
-            )
-        # pylint: enable=protected-access
         model = _set_mode(model, mode)
         new_model = tf.keras.models.clone_model(model, input_tensors)
 
@@ -218,11 +210,9 @@ def to_streaming_inference(model_non_stream, config, mode):
     else:
         dtype = model_non_stream.input.dtype
 
-    input_tensors = [
-        tf.keras.layers.Input(
-            shape=input_data_shape, batch_size=1, dtype=dtype, name="input_audio"
-        )
-    ]
+    input_tensors = tf.keras.layers.Input(
+        shape=input_data_shape, batch_size=1, dtype=dtype, name="input_audio"
+    )
 
     if (
         isinstance(model_non_stream.input, (tuple, list))
@@ -233,14 +223,16 @@ def to_streaming_inference(model_non_stream, config, mode):
                 "Maximum number of inputs supported is 2 (input_audio and "
                 "cond_features), but got %d inputs" % len(model_non_stream.input)
             )
-        input_tensors.append(
+
+        input_tensors = [
+            input_tensors,
             tf.keras.layers.Input(
                 shape=config["cond_shape"],
                 batch_size=1,
                 dtype=model_non_stream.input[1].dtype,
                 name="cond_features",
-            )
-        )
+            ),
+        ]
 
     model_inference = convert_to_inference_model(model_non_stream, input_tensors, mode)
     return model_inference
@@ -279,7 +271,7 @@ def model_to_saved(
         model = to_streaming_inference(model_non_stream, config, mode)
 
     save_model_summary(model, save_model_path)
-    model.save(save_model_path, include_optimizer=False, save_format="tf")
+    model.export(save_model_path)
 
 
 def convert_saved_model_to_tflite(
@@ -295,8 +287,6 @@ def convert_saved_model_to_tflite(
         fname: output filename for TFLite file
         quantize: boolean selecting whether to quantize the model
     """
-    if not os.path.exists(folder):
-        os.makedirs(folder)
 
     def representative_dataset_gen():
         sample_fingerprints, _, _ = audio_processor.get_data(
@@ -316,30 +306,29 @@ def convert_saved_model_to_tflite(
         stride = config["stride"]
 
         for spectrogram in sample_fingerprints:
+            assert spectrogram.shape[0] % stride == 0
+
             for i in range(0, spectrogram.shape[0] - stride, stride):
                 sample = spectrogram[i : i + stride, :].astype(np.float32)
                 yield [sample]
 
-    converter = tf.compat.v2.lite.TFLiteConverter.from_saved_model(path_to_model)
-    converter.experimental_enable_resource_variables = True
-    converter.experimental_new_converter = True
-
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    converter = tf.lite.TFLiteConverter.from_saved_model(path_to_model)
+    converter.optimizations = {tf.lite.Optimize.DEFAULT}
 
     if quantize:
-        converter.experimental_new_quantizer = True
-        converter._experimental_variable_quantization = True
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-
-        converter.inference_type = tf.int8
+        converter.target_spec.supported_ops = {tf.lite.OpsSet.TFLITE_BUILTINS_INT8}
         converter.inference_input_type = tf.int8
         converter.inference_output_type = tf.uint8
+        converter.representative_dataset = tf.lite.RepresentativeDataset(
+            representative_dataset_gen
+        )
 
-        converter.representative_dataset = representative_dataset_gen
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
-    tflite_model = converter.convert()
-    path_to_output = os.path.join(folder, fname)
-    open(path_to_output, "wb").write(tflite_model)
+    with open(os.path.join(folder, fname), "wb") as f:
+        tflite_model = converter.convert()
+        f.write(tflite_model)
 
 
 def convert_model_saved(model, config, folder, mode):
@@ -355,10 +344,6 @@ def convert_model_saved(model, config, folder, mode):
     path_model = os.path.join(config["train_dir"], folder)
     if not os.path.exists(path_model):
         os.makedirs(path_model)
-    try:
-        # Convert trained model to SavedModel
-        model_to_saved(model, config, path_model, mode)
-    except IOError as e:
-        logging.warning("FAILED to write file: %s", e)
-    except (ValueError, AttributeError, RuntimeError, TypeError, AssertionError) as e:
-        logging.warning("WARNING: failed to convert to SavedModel: %s", e)
+
+    # Convert trained model to SavedModel
+    model_to_saved(model, config, path_model, mode)
