@@ -16,8 +16,20 @@
 
 import argparse
 import os
+import sys
 import yaml
+import platform
 from absl import logging
+
+import tensorflow as tf
+
+# Disable GPU by default on ARM Macs, it's slower than just using the CPU
+if os.environ.get("CUDA_VISIBLE_DEVICES") == "-1" or (
+    sys.platform == "darwin"
+    and platform.processor() == "arm"
+    and "CUDA_VISIBLE_DEVICES" not in os.environ
+):
+    tf.config.set_visible_devices([], "GPU")
 
 import microwakeword.data as input_data
 import microwakeword.train as train
