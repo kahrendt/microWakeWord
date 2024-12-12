@@ -256,7 +256,6 @@ def to_streaming_inference(model_non_stream, config, mode):
 def model_to_saved(
     model_non_stream,
     config,
-    save_model_path,
     mode=modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
 ):
     """Convert Keras model to SavedModel.
@@ -268,7 +267,6 @@ def model_to_saved(
     Args:
       model_non_stream: Keras non streamable model
       config: dictionary containing microWakeWord training configuration
-      save_model_path: path where saved model representation with be stored
       mode: inference mode it can be streaming with internal state or non
         streaming
     """
@@ -285,8 +283,7 @@ def model_to_saved(
         # convert non streaming Keras model to Keras streaming model, internal state
         model = to_streaming_inference(model_non_stream, config, mode)
 
-    save_model_summary(model, save_model_path)
-    model.export(save_model_path)
+    return model
 
 
 def convert_saved_model_to_tflite(
@@ -335,7 +332,7 @@ def convert_saved_model_to_tflite(
         converter.inference_input_type = tf.int8
         converter.inference_output_type = tf.uint8
         converter.representative_dataset = tf.lite.RepresentativeDataset(
-            lambda: representative_dataset_gen(audio_processor, config)
+            representative_dataset_gen
         )
 
     if not os.path.exists(folder):
@@ -361,4 +358,22 @@ def convert_model_saved(model, config, folder, mode):
         os.makedirs(path_model)
 
     # Convert trained model to SavedModel
-    model_to_saved(model, config, path_model, mode)
+    converted_model = model_to_saved(model, config, mode)
+    converted_model.summary()
+
+    assert converted_model.input.shape[0] is not None
+
+    # XXX: Using `converted_model.export(path_model)` results in obscure errors during
+    # quantization, we create an export archive directly instead.
+    export_archive = tf.keras.export.ExportArchive()
+    export_archive.track(converted_model)
+    export_archive.add_endpoint(
+        name="serve",
+        fn=converted_model.call,
+        input_signature=[tf.TensorSpec(shape=converted_model.input.shape, dtype=tf.float32)],
+    )
+    export_archive.write_out(path_model)
+
+    save_model_summary(converted_model, path_model)
+
+    return converted_model
