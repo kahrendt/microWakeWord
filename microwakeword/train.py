@@ -39,22 +39,23 @@ def validate_nonstreaming(config, data_processor, model, test_set):
     result = model.evaluate(
         testing_fingerprints,
         testing_ground_truth,
+        return_dict=True,
     )
 
     metrics = {}
-    metrics["accuracy"] = result[1]
-    metrics["recall"] = result[2]
-    metrics["precision"] = result[3]
+    metrics["accuracy"] = result["accuracy"]
+    metrics["recall"] = result["recall"]
+    metrics["precision"] = result["precision"]
 
-    metrics["auc"] = result[8]
-    metrics["loss"] = result[9]
+    metrics["auc"] = result["auc"]
+    metrics["loss"] = result["loss"]
     metrics["recall_at_no_faph"] = 0
     metrics["cutoff_for_no_faph"] = 0
     metrics["ambient_false_positives"] = 0
     metrics["ambient_false_positives_per_hour"] = 0
     metrics["average_viable_recall"] = 0
 
-    test_set_fp = result[5]
+    test_set_fp = result["fp"]
 
     if data_processor.get_mode_size("validation_ambient") > 0:
         (
@@ -72,18 +73,19 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         ambient_predictions = model.evaluate(
             ambient_testing_fingerprints,
             ambient_testing_ground_truth,
+            return_dict=True,
         )
 
         duration_of_ambient_set = (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
         )
 
-        true_positives = ambient_predictions[4]
-        false_positives = ambient_predictions[5] - test_set_fp
-        false_negatives = ambient_predictions[7]
+        true_positives = ambient_predictions["tp"]
+        false_positives = ambient_predictions["fp"] - test_set_fp
+        false_negatives = ambient_predictions["fn"]
 
-        metrics["auc"] = ambient_predictions[8]
-        metrics["loss"] = ambient_predictions[9]
+        metrics["auc"] = ambient_predictions["auc"]
+        metrics["loss"] = ambient_predictions["loss"]
 
         recall_at_cutoffs = true_positives / (true_positives + false_negatives)
         faph_at_cutoffs = false_positives / duration_of_ambient_set
