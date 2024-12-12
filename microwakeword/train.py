@@ -55,7 +55,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
     metrics["ambient_false_positives_per_hour"] = 0
     metrics["average_viable_recall"] = 0
 
-    test_set_fp = result["fp"]
+    test_set_fp = result["fp"].numpy()
 
     if data_processor.get_mode_size("validation_ambient") > 0:
         (
@@ -70,6 +70,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         )
         ambient_testing_ground_truth = ambient_testing_ground_truth.reshape(-1, 1)
 
+        model.reset_metrics()
         ambient_predictions = model.evaluate(
             ambient_testing_fingerprints,
             ambient_testing_ground_truth,
@@ -94,7 +95,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             out=np.zeros_like(true_positives),
             where=all_positives > 0,
         )
-        faph_at_cutoffs = false_positives / duration_of_ambient_set
+        faph_at_cutoffs = (false_positives / duration_of_ambient_set).numpy()
 
         target_faph_cutoff_probability = 1.0
         for index, cutoff in enumerate(np.linspace(0.0, 1.0, 101)):
@@ -139,7 +140,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
 
         metrics["recall_at_no_faph"] = recall_at_no_faph
         metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
-        metrics["ambient_false_positives"] = false_positives[50]
+        metrics["ambient_false_positives"] = false_positives[50].numpy()
         metrics["ambient_false_positives_per_hour"] = faph_at_cutoffs[50]
         metrics["average_viable_recall"] = average_viable_recall
 
