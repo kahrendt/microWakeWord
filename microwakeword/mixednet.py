@@ -20,8 +20,6 @@ from microwakeword.layers import strided_drop
 
 import ast
 import tensorflow as tf
-from tensorflow.keras.layers import Layer
-
 
 
 def parse(text):
@@ -148,7 +146,7 @@ def _get_shape_value(maybe_v2_shape):
         return maybe_v2_shape.value
 
 
-class ChannelSplit(Layer):
+class ChannelSplit(tf.keras.layers.Layer):
     def __init__(self, splits, axis=-1, **kwargs):
         super().__init__(**kwargs)
         self.splits = splits
@@ -167,7 +165,7 @@ class ChannelSplit(Layer):
 
 
 
-class MixConv(object):
+class MixConv:
     """MixConv with mixed depthwise convolutional kernels.
 
     MDConv is an improved depthwise convolution that mixes multiple kernels (e.g.
@@ -202,7 +200,7 @@ class MixConv(object):
         #   - This avoids variable's holding redundant information
         #   - Reduces the necessary size of the tensor arena
         net = stream.Stream(
-            cell=tf.identity,
+            cell=tf.keras.layers.Identity(),
             ring_buffer_size_in_time_dim=self.ring_buffer_length,
             use_one_step=False,
         )(inputs)
@@ -233,7 +231,7 @@ class MixConv(object):
         return x
 
 
-class SpatialAttention(object):
+class SpatialAttention(tf.keras.layers.Layer):
     """Spatial Attention Layer based on CBAM: Convolutional Block Attention Module
     https://arxiv.org/pdf/1807.06521v2
 
@@ -242,10 +240,12 @@ class SpatialAttention(object):
     """
 
     def __init__(self, kernel_size, ring_buffer_size, **kwargs):
+        super().__init__(**kwargs)
+
         self.kernel_size = kernel_size
         self.ring_buffer_size = ring_buffer_size
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         tranposed = tf.transpose(inputs, perm=[0, 1, 3, 2])
         channel_avg = tf.keras.layers.AveragePooling2D(
             pool_size=(1, tranposed.shape[2]), strides=(1, tranposed.shape[2])
@@ -267,13 +267,19 @@ class SpatialAttention(object):
         )(pooled)
 
         net = stream.Stream(
-            cell=tf.identity,
+            cell=tf.keras.layers.Identity(),
             ring_buffer_size_in_time_dim=self.ring_buffer_size,
             use_one_step=False,
         )(inputs)
         net = net[:, -attention.shape[1] :, :, :]
 
         return net * attention
+
+    def get_config(self):
+        return {
+            "kernel_size": self.kernel_size,
+            "ring_buffer_size": self.ring_buffer_size,
+        }
 
 
 def model(flags, shape, batch_size):
@@ -365,7 +371,7 @@ def model(flags, shape, batch_size):
             net = SpatialAttention(4, net.shape[1] - 1)(net)
         else:
             net = stream.Stream(
-                cell=tf.identity,
+                cell=tf.keras.layers.Identity(),
                 ring_buffer_size_in_time_dim=net.shape[1] - 1,
                 use_one_step=False,
             )(net)

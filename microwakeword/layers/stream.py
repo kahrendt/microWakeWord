@@ -559,9 +559,9 @@ class Stream(tf.keras.layers.Layer):
 
             with tf.control_dependencies([assign_states]):
                 if self.transposed_conv_crop_output:
-                    return tf.identity(outputs[:, 0 : self.output_time_dim, :])
+                    return tf.keras.layers.Identity()(outputs[:, 0 : self.output_time_dim, :])
                 else:
-                    return tf.identity(outputs)
+                    return tf.keras.layers.Identity()(outputs)
         else:
             if self.use_one_step:
                 # The time dimenstion always has to equal 1 in streaming mode.
