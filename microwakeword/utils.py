@@ -210,9 +210,12 @@ def to_streaming_inference(model_non_stream, config, mode):
     else:
         dtype = model_non_stream.input.dtype
 
-    input_tensors = tf.keras.layers.Input(
-        shape=input_data_shape, batch_size=1, dtype=dtype, name="input_audio"
-    )
+    # For streaming, set the batch size to 1
+    input_tensors = [
+        tf.keras.layers.Input(
+            shape=input_data_shape, batch_size=1, dtype=dtype, name="input_audio"
+        )
+    ]
 
     if (
         isinstance(model_non_stream.input, (tuple, list))
@@ -224,17 +227,25 @@ def to_streaming_inference(model_non_stream, config, mode):
                 "cond_features), but got %d inputs" % len(model_non_stream.input)
             )
 
-        input_tensors = [
-            input_tensors,
+        input_tensors.append(
             tf.keras.layers.Input(
                 shape=config["cond_shape"],
                 batch_size=1,
                 dtype=model_non_stream.input[1].dtype,
                 name="cond_features",
-            ),
-        ]
+            )
+        )
 
-    model_inference = convert_to_inference_model(model_non_stream, input_tensors, mode)
+    # Input tensors must have the same shape as the original
+    if isinstance(model_non_stream.input, (tuple, list)):
+        model_inference = convert_to_inference_model(
+            model_non_stream, input_tensors, mode
+        )
+    else:
+        model_inference = convert_to_inference_model(
+            model_non_stream, input_tensors[0], mode
+        )
+
     return model_inference
 
 
@@ -320,7 +331,7 @@ def convert_saved_model_to_tflite(
         converter.inference_input_type = tf.int8
         converter.inference_output_type = tf.uint8
         converter.representative_dataset = tf.lite.RepresentativeDataset(
-            representative_dataset_gen
+            lambda: representative_dataset_gen(audio_processor, config)
         )
 
     if not os.path.exists(folder):
