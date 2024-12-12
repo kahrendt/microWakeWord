@@ -87,7 +87,13 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         metrics["auc"] = ambient_predictions["auc"]
         metrics["loss"] = ambient_predictions["loss"]
 
-        recall_at_cutoffs = true_positives / (true_positives + false_negatives)
+        all_positives = true_positives + false_negatives
+        recall_at_cutoffs = np.divide(
+            true_positives,
+            all_positives,
+            out=np.zeros_like(true_positives),
+            where=all_positives > 0,
+        )
         faph_at_cutoffs = false_positives / duration_of_ambient_set
 
         target_faph_cutoff_probability = 1.0
