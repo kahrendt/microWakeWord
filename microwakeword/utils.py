@@ -21,7 +21,7 @@ import tensorflow as tf
 
 from absl import logging
 
-from microwakeword.layers import modes
+from microwakeword.layers import modes, stream, strided_drop
 
 
 def _set_mode(model, mode):
@@ -34,6 +34,10 @@ def _set_mode(model, mode):
         config = layer.get_config()
         # for every layer set mode, if it has it
         if "mode" in config:
+            assert isinstance(
+                layer,
+                (stream.Stream, strided_drop.StridedDrop, strided_drop.StridedKeep),
+            )
             layer.mode = mode
         # with any mode of inference - training is False
         if "training" in config:
