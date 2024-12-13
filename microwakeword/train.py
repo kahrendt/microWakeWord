@@ -84,9 +84,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         )
         ambient_testing_ground_truth = ambient_testing_ground_truth.reshape(-1, 1)
 
-        # XXX: tf no longer provides a way to evaluate a model without updating metrics.
-        # One workaround is manually managing metrics by turning this evaluation
-        # function into a callback.
+        # XXX: tf no longer provides a way to evaluate a model without updating metrics
         with swap_attribute(model, "reset_metrics", lambda: None):
             ambient_predictions = model.evaluate(
                 ambient_testing_fingerprints,
@@ -95,27 +93,23 @@ def validate_nonstreaming(config, data_processor, model, test_set):
                 verbose=0,
             )
 
-        model.reset_metrics()
-
         duration_of_ambient_set = (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
         )
 
-        true_positives = ambient_predictions["tp"]
-        false_positives = ambient_predictions["fp"] - test_set_fp
-        false_negatives = ambient_predictions["fn"]
+        # Other than the false positive rate, all other metrics are accumulated across
+        # both test sets
+        all_true_positives = ambient_predictions["tp"].numpy()
+        ambient_false_positives = ambient_predictions["fp"].numpy() - test_set_fp
+        all_false_negatives = ambient_predictions["fn"].numpy()
 
         metrics["auc"] = ambient_predictions["auc"]
         metrics["loss"] = ambient_predictions["loss"]
 
-        all_positives = true_positives + false_negatives
-        recall_at_cutoffs = np.divide(
-            true_positives,
-            all_positives,
-            out=np.zeros_like(true_positives),
-            where=all_positives > 0,
+        recall_at_cutoffs = (
+            all_true_positives / (all_true_positives + all_false_negatives)
         )
-        faph_at_cutoffs = (false_positives / duration_of_ambient_set).numpy()
+        faph_at_cutoffs = ambient_false_positives / duration_of_ambient_set
 
         target_faph_cutoff_probability = 1.0
         for index, cutoff in enumerate(np.linspace(0.0, 1.0, 101)):
@@ -160,7 +154,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
 
         metrics["recall_at_no_faph"] = recall_at_no_faph
         metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
-        metrics["ambient_false_positives"] = false_positives[50].numpy()
+        metrics["ambient_false_positives"] = ambient_false_positives[50]
         metrics["ambient_false_positives_per_hour"] = faph_at_cutoffs[50]
         metrics["average_viable_recall"] = average_viable_recall
 
@@ -447,7 +441,9 @@ def train(model, config, data_processor):
                 best_no_faph_cutoff = current_no_faph_cutoff
 
                 # overwrite the best model weights
-                model.save_weights(os.path.join(config["train_dir"], "best_weights.weights.h5"))
+                model.save_weights(
+                    os.path.join(config["train_dir"], "best_weights.weights.h5")
+                )
                 checkpoint.save(file_prefix=checkpoint_prefix)
 
             logging.info(
