@@ -16,6 +16,7 @@
 
 import os
 import platform
+import contextlib
 
 from absl import logging
 
@@ -23,6 +24,18 @@ import numpy as np
 import tensorflow as tf
 
 from tensorflow.python.util import tf_decorator
+
+
+@contextlib.contextmanager
+def swap_attribute(obj, attr, temp_value):
+    """Temporarily swap an attribute of an object."""
+    original_value = getattr(obj, attr)
+    setattr(obj, attr, temp_value)
+
+    try:
+        yield
+    finally:
+        setattr(obj, attr, original_value)
 
 
 def validate_nonstreaming(config, data_processor, model, test_set):
@@ -40,6 +53,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         testing_fingerprints,
         testing_ground_truth,
         return_dict=True,
+        verbose=0,
     )
 
     metrics = {}
@@ -70,12 +84,18 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         )
         ambient_testing_ground_truth = ambient_testing_ground_truth.reshape(-1, 1)
 
+        # XXX: tf no longer provides a way to evaluate a model without updating metrics.
+        # One workaround is manually managing metrics by turning this evaluation
+        # function into a callback.
+        with swap_attribute(model, "reset_metrics", lambda: None):
+            ambient_predictions = model.evaluate(
+                ambient_testing_fingerprints,
+                ambient_testing_ground_truth,
+                return_dict=True,
+                verbose=0,
+            )
+
         model.reset_metrics()
-        ambient_predictions = model.evaluate(
-            ambient_testing_fingerprints,
-            ambient_testing_ground_truth,
-            return_dict=True,
-        )
 
         duration_of_ambient_set = (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
