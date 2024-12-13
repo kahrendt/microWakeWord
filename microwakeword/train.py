@@ -386,10 +386,12 @@ def train(model, config, data_processor):
                 )
                 validation_writer.flush()
 
+            os.makedirs(os.path.join(config["train_dir"], "train"), exist_ok=True)
+
             model.save_weights(
                 os.path.join(
                     config["train_dir"],
-                    "train"
+                    "train",
                     f"{int(best_minimization_quantity * 10000)}_weights_{training_step}.weights.h5",
                 )
             )
