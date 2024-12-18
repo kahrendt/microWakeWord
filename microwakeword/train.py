@@ -16,11 +16,26 @@
 
 import os
 import platform
+import contextlib
 
 from absl import logging
 
 import numpy as np
 import tensorflow as tf
+
+from tensorflow.python.util import tf_decorator
+
+
+@contextlib.contextmanager
+def swap_attribute(obj, attr, temp_value):
+    """Temporarily swap an attribute of an object."""
+    original_value = getattr(obj, attr)
+    setattr(obj, attr, temp_value)
+
+    try:
+        yield
+    finally:
+        setattr(obj, attr, original_value)
 
 
 def validate_nonstreaming(config, data_processor, model, test_set):
@@ -30,31 +45,32 @@ def validate_nonstreaming(config, data_processor, model, test_set):
         features_length=config["spectrogram_length"],
         truncation_strategy="truncate_start",
     )
-
-    test_batch_size = 1024
+    testing_ground_truth = testing_ground_truth.reshape(-1, 1)
 
     model.reset_metrics()
-    for i in range(0, len(testing_fingerprints), test_batch_size):
-        result = model.test_on_batch(
-            testing_fingerprints[i : i + test_batch_size],
-            testing_ground_truth[i : i + test_batch_size],
-            reset_metrics=False,
-        )
+
+    result = model.evaluate(
+        testing_fingerprints,
+        testing_ground_truth,
+        batch_size=1024,
+        return_dict=True,
+        verbose=0,
+    )
 
     metrics = {}
-    metrics["accuracy"] = result[1]
-    metrics["recall"] = result[2]
-    metrics["precision"] = result[3]
+    metrics["accuracy"] = result["accuracy"]
+    metrics["recall"] = result["recall"]
+    metrics["precision"] = result["precision"]
 
-    metrics["auc"] = result[8]
-    metrics["loss"] = result[9]
+    metrics["auc"] = result["auc"]
+    metrics["loss"] = result["loss"]
     metrics["recall_at_no_faph"] = 0
     metrics["cutoff_for_no_faph"] = 0
     metrics["ambient_false_positives"] = 0
     metrics["ambient_false_positives_per_hour"] = 0
     metrics["average_viable_recall"] = 0
 
-    test_set_fp = result[5]
+    test_set_fp = result["fp"].numpy()
 
     if data_processor.get_mode_size("validation_ambient") > 0:
         (
@@ -67,27 +83,35 @@ def validate_nonstreaming(config, data_processor, model, test_set):
             features_length=config["spectrogram_length"],
             truncation_strategy="split",
         )
+        ambient_testing_ground_truth = ambient_testing_ground_truth.reshape(-1, 1)
 
-        for i in range(0, len(ambient_testing_fingerprints), test_batch_size):
-            ambient_predictions = model.test_on_batch(
-                ambient_testing_fingerprints[i : i + test_batch_size],
-                ambient_testing_ground_truth[i : i + test_batch_size],
-                reset_metrics=False,
+        # XXX: tf no longer provides a way to evaluate a model without updating metrics
+        with swap_attribute(model, "reset_metrics", lambda: None):
+            ambient_predictions = model.evaluate(
+                ambient_testing_fingerprints,
+                ambient_testing_ground_truth,
+                batch_size=1024,
+                return_dict=True,
+                verbose=0,
             )
 
         duration_of_ambient_set = (
             data_processor.get_mode_duration("validation_ambient") / 3600.0
         )
 
-        true_positives = ambient_predictions[4]
-        false_positives = ambient_predictions[5] - test_set_fp
-        false_negatives = ambient_predictions[7]
+        # Other than the false positive rate, all other metrics are accumulated across
+        # both test sets
+        all_true_positives = ambient_predictions["tp"].numpy()
+        ambient_false_positives = ambient_predictions["fp"].numpy() - test_set_fp
+        all_false_negatives = ambient_predictions["fn"].numpy()
 
-        metrics["auc"] = ambient_predictions[8]
-        metrics["loss"] = ambient_predictions[9]
+        metrics["auc"] = ambient_predictions["auc"]
+        metrics["loss"] = ambient_predictions["loss"]
 
-        recall_at_cutoffs = true_positives / (true_positives + false_negatives)
-        faph_at_cutoffs = false_positives / duration_of_ambient_set
+        recall_at_cutoffs = (
+            all_true_positives / (all_true_positives + all_false_negatives)
+        )
+        faph_at_cutoffs = ambient_false_positives / duration_of_ambient_set
 
         target_faph_cutoff_probability = 1.0
         for index, cutoff in enumerate(np.linspace(0.0, 1.0, 101)):
@@ -132,7 +156,7 @@ def validate_nonstreaming(config, data_processor, model, test_set):
 
         metrics["recall_at_no_faph"] = recall_at_no_faph
         metrics["cutoff_for_no_faph"] = target_faph_cutoff_probability
-        metrics["ambient_false_positives"] = false_positives[50]
+        metrics["ambient_false_positives"] = ambient_false_positives[50]
         metrics["ambient_false_positives_per_hour"] = faph_at_cutoffs[50]
         metrics["average_viable_recall"] = average_viable_recall
 
@@ -140,7 +164,6 @@ def validate_nonstreaming(config, data_processor, model, test_set):
 
 
 def train(model, config, data_processor):
-
     # Assign default training settings if not set in the configuration yaml
     if not (training_steps_list := config.get("training_steps")):
         training_steps_list = [20000]
@@ -181,10 +204,7 @@ def train(model, config, data_processor):
     pad_list_with_last_entry(negative_class_weight_list, training_step_iterations)
 
     loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
-    if platform.system() == "Darwin" and platform.processor() == "arm":
-        optimizer = tf.keras.optimizers.legacy.Adam()
-    else:
-        optimizer = tf.keras.optimizers.Adam()
+    optimizer = tf.keras.optimizers.Adam()
 
     cutoffs = np.linspace(0.0, 1.0, 101).tolist()
 
@@ -201,6 +221,10 @@ def train(model, config, data_processor):
     ]
 
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+    # We un-decorate the `tf.function`, it's very slow to manually run training batches
+    model.make_train_function()
+    _, model.train_function = tf_decorator.unwrap(model.train_function)
 
     # Configure checkpointer and restore if available
     checkpoint_directory = os.path.join(config["train_dir"], "restore/")
@@ -238,7 +262,7 @@ def train(model, config, data_processor):
                 negative_class_weight = negative_class_weight_list[i]
                 break
 
-        tf.keras.backend.set_value(model.optimizer.lr, learning_rate)
+        model.optimizer.learning_rate.assign(learning_rate)
 
         augmentation_policy = {
             "mix_up_prob": mix_up_prob,
@@ -261,14 +285,17 @@ def train(model, config, data_processor):
             augmentation_policy=augmentation_policy,
         )
 
+        train_ground_truth = train_ground_truth.reshape(-1, 1)
+
         class_weights = {0: negative_class_weight, 1: positive_class_weight}
+        combined_weights = train_sample_weights * np.vectorize(class_weights.get)(
+            train_ground_truth
+        )
 
         result = model.train_on_batch(
             train_fingerprints,
             train_ground_truth,
-            sample_weight=train_sample_weights,
-            class_weight=class_weights,
-            reset_metrics=False,
+            sample_weight=combined_weights,
         )
 
         # Print the running statistics in the current validation epoch
@@ -306,7 +333,9 @@ def train(model, config, data_processor):
                 tf.summary.scalar("auc", result[8], step=training_step)
                 train_writer.flush()
 
-            model.save_weights(os.path.join(config["train_dir"], "last_weights"))
+            model.save_weights(
+                os.path.join(config["train_dir"], "last_weights.weights.h5")
+            )
 
             nonstreaming_metrics = validate_nonstreaming(
                 config, data_processor, model, "validation"
@@ -359,13 +388,13 @@ def train(model, config, data_processor):
                 )
                 validation_writer.flush()
 
+            os.makedirs(os.path.join(config["train_dir"], "train"), exist_ok=True)
+
             model.save_weights(
                 os.path.join(
                     config["train_dir"],
-                    "train/",
-                    str(int(best_minimization_quantity * 10000))
-                    + "weights_"
-                    + str(training_step),
+                    "train",
+                    f"{int(best_minimization_quantity * 10000)}_weights_{training_step}.weights.h5",
                 )
             )
 
@@ -416,7 +445,9 @@ def train(model, config, data_processor):
                 best_no_faph_cutoff = current_no_faph_cutoff
 
                 # overwrite the best model weights
-                model.save_weights(os.path.join(config["train_dir"], "best_weights"))
+                model.save_weights(
+                    os.path.join(config["train_dir"], "best_weights.weights.h5")
+                )
                 checkpoint.save(file_prefix=checkpoint_prefix)
 
             logging.info(
@@ -428,4 +459,4 @@ def train(model, config, data_processor):
 
     # Save checkpoint after training
     checkpoint.save(file_prefix=checkpoint_prefix)
-    model.save_weights(os.path.join(config["train_dir"], "last_weights"))
+    model.save_weights(os.path.join(config["train_dir"], "last_weights.weights.h5"))

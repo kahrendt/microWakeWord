@@ -14,7 +14,7 @@ setuptools.setup(
         "numpy",
         "pymicro-features",
         "pyyaml",
-        "tensorflow>=2.14,<=2.15",
+        "tensorflow>=2.16",
         "webrtcvad",
     ],
     author="Kevin Ahrendt",

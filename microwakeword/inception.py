@@ -250,7 +250,7 @@ def model(flags, shape, batch_size):
     net = input_audio
 
     # [batch, time, feature]
-    net = tf.keras.backend.expand_dims(net, axis=2)
+    net = tf.keras.ops.expand_dims(net, axis=2)
     # [batch, time, 1, feature]
 
     for filters, kernel_size, subgroups in zip(

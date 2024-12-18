@@ -146,7 +146,26 @@ def _get_shape_value(maybe_v2_shape):
         return maybe_v2_shape.value
 
 
-class MixConv(object):
+class ChannelSplit(tf.keras.layers.Layer):
+    def __init__(self, splits, axis=-1, **kwargs):
+        super().__init__(**kwargs)
+        self.splits = splits
+        self.axis = axis
+
+    def call(self, inputs):
+        return tf.split(inputs, self.splits, axis=self.axis)
+
+    def compute_output_shape(self, input_shape):
+        output_shapes = []
+        for split in self.splits:
+            new_shape = list(input_shape)
+            new_shape[self.axis] = split
+            output_shapes.append(tuple(new_shape))
+        return output_shapes
+
+
+
+class MixConv:
     """MixConv with mixed depthwise convolutional kernels.
 
     MDConv is an improved depthwise convolution that mixes multiple kernels (e.g.
@@ -181,7 +200,7 @@ class MixConv(object):
         #   - This avoids variable's holding redundant information
         #   - Reduces the necessary size of the tensor arena
         net = stream.Stream(
-            cell=tf.identity,
+            cell=tf.keras.layers.Identity(),
             ring_buffer_size_in_time_dim=self.ring_buffer_length,
             use_one_step=False,
         )(inputs)
@@ -193,7 +212,7 @@ class MixConv(object):
 
         filters = _get_shape_value(net.shape[self._channel_axis])
         splits = _split_channels(filters, len(self.kernel_sizes))
-        x_splits = tf.split(net, splits, self._channel_axis)
+        x_splits = ChannelSplit(splits, axis=self._channel_axis)(net)
 
         x_outputs = []
         for x, ks in zip(x_splits, self.kernel_sizes):
@@ -208,11 +227,11 @@ class MixConv(object):
             features_drop = output.shape[1] - x_outputs[-1].shape[1]
             x_outputs[i] = strided_drop.StridedDrop(features_drop)(output)
 
-        x = tf.concat(x_outputs, self._channel_axis)
+        x = tf.keras.layers.concatenate(x_outputs, axis=self._channel_axis)
         return x
 
 
-class SpatialAttention(object):
+class SpatialAttention(tf.keras.layers.Layer):
     """Spatial Attention Layer based on CBAM: Convolutional Block Attention Module
     https://arxiv.org/pdf/1807.06521v2
 
@@ -221,10 +240,12 @@ class SpatialAttention(object):
     """
 
     def __init__(self, kernel_size, ring_buffer_size, **kwargs):
+        super().__init__(**kwargs)
+
         self.kernel_size = kernel_size
         self.ring_buffer_size = ring_buffer_size
 
-    def __call__(self, inputs):
+    def call(self, inputs):
         tranposed = tf.transpose(inputs, perm=[0, 1, 3, 2])
         channel_avg = tf.keras.layers.AveragePooling2D(
             pool_size=(1, tranposed.shape[2]), strides=(1, tranposed.shape[2])
@@ -246,13 +267,19 @@ class SpatialAttention(object):
         )(pooled)
 
         net = stream.Stream(
-            cell=tf.identity,
+            cell=tf.keras.layers.Identity(),
             ring_buffer_size_in_time_dim=self.ring_buffer_size,
             use_one_step=False,
         )(inputs)
         net = net[:, -attention.shape[1] :, :, :]
 
         return net * attention
+
+    def get_config(self):
+        return {
+            "kernel_size": self.kernel_size,
+            "ring_buffer_size": self.ring_buffer_size,
+        }
 
 
 def model(flags, shape, batch_size):
@@ -291,7 +318,7 @@ def model(flags, shape, batch_size):
     net = input_audio
 
     # make it [batch, time, 1, feature]
-    net = tf.keras.backend.expand_dims(net, axis=2)
+    net = tf.keras.ops.expand_dims(net, axis=2)
 
     # Streaming Conv2D with 'valid' padding
     if flags.first_conv_filters > 0:
@@ -344,7 +371,7 @@ def model(flags, shape, batch_size):
             net = SpatialAttention(4, net.shape[1] - 1)(net)
         else:
             net = stream.Stream(
-                cell=tf.identity,
+                cell=tf.keras.layers.Identity(),
                 ring_buffer_size_in_time_dim=net.shape[1] - 1,
                 use_one_step=False,
             )(net)
