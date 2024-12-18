@@ -16,8 +16,20 @@
 
 import argparse
 import os
+import sys
 import yaml
+import platform
 from absl import logging
+
+import tensorflow as tf
+
+# Disable GPU by default on ARM Macs, it's slower than just using the CPU
+if os.environ.get("CUDA_VISIBLE_DEVICES") == "-1" or (
+    sys.platform == "darwin"
+    and platform.processor() == "arm"
+    and "CUDA_VISIBLE_DEVICES" not in os.environ
+):
+    tf.config.set_visible_devices([], "GPU")
 
 import microwakeword.data as input_data
 import microwakeword.train as train
@@ -25,6 +37,7 @@ import microwakeword.test as test
 import microwakeword.utils as utils
 
 import microwakeword.inception as inception
+import microwakeword.mixednet as mixednet
 
 from microwakeword.layers import modes
 
@@ -40,23 +53,25 @@ def load_config(flags, model_module):
         dict: dictionary containing training configuration
     """
     config_filename = flags.training_config
+    config = yaml.load(open(config_filename, "r").read(), yaml.Loader)
+
+    config["summaries_dir"] = os.path.join(config["train_dir"], "logs/")
+
+    config["stride"] = flags.__dict__.get("stride", 1)
+    config["window_step_ms"] = config.get("window_step_ms", 20)
 
     # Default preprocessor settings
     preprocessor_sample_rate = 16000  # Hz
     preprocessor_window_size = 30  # ms
-    preprocessor_window_stride = 20  # ms
-
-    config = yaml.load(open(config_filename, "r").read(), yaml.Loader)
-
-    config["summaries_dir"] = os.path.join(config["train_dir"], "logs/")
+    preprocessor_window_step = config["window_step_ms"]  # ms
 
     desired_samples = int(preprocessor_sample_rate * config["clip_duration_ms"] / 1000)
 
     window_size_samples = int(
         preprocessor_sample_rate * preprocessor_window_size / 1000
     )
-    window_stride_samples = int(
-        preprocessor_sample_rate * preprocessor_window_stride / 1000
+    window_step_samples = int(
+        config["stride"] * preprocessor_sample_rate * preprocessor_window_step / 1000
     )
 
     length_minus_window = desired_samples - window_size_samples
@@ -65,7 +80,7 @@ def load_config(flags, model_module):
         config["spectrogram_length_final_layer"] = 0
     else:
         config["spectrogram_length_final_layer"] = 1 + int(
-            length_minus_window / window_stride_samples
+            length_minus_window / window_step_samples
         )
 
     config["spectrogram_length"] = config[
@@ -96,7 +111,7 @@ def train_model(config, model, data_processor, restore_checkpoint):
     try:
         os.makedirs(config["train_dir"])
         os.mkdir(config["summaries_dir"])
-    except OSError as e:
+    except OSError:
         if restore_checkpoint:
             pass
         else:
@@ -119,6 +134,7 @@ def evaluate_model(
     data_processor,
     test_tf_nonstreaming,
     test_tflite_nonstreaming,
+    test_tflite_nonstreaming_quantized,
     test_tflite_streaming,
     test_tflite_streaming_quantized,
 ):
@@ -132,19 +148,25 @@ def evaluate_model(
         model (Keras model): model (with loaded weights) to test
         data_processor (FeatureHandler): feature handler that loads spectrogram data
         test_tf_nonstreaming (bool): Evaluate the nonstreaming SavedModel
+        test_tflite_nonstreaming_quantized (bool): Convert and evaluate quantized nonstreaming TFLite model
         test_tflite_nonstreaming (bool): Convert and evaluate nonstreaming TFLite model
         test_tflite_streaming (bool): Convert and evaluate streaming TFLite model
         test_tflite_streaming_quantized (bool): Convert and evaluate quantized streaming TFLite model
     """
-    if test_tf_nonstreaming or test_tflite_nonstreaming:
+
+    if (
+        test_tf_nonstreaming
+        or test_tflite_nonstreaming
+        or test_tflite_nonstreaming_quantized
+    ):
         # Save the nonstreaming model to disk
         logging.info("Saving nonstreaming model")
 
         utils.convert_model_saved(
             model,
             config,
-            "non_stream",
-            modes.Modes.NON_STREAM_INFERENCE,
+            folder="non_stream",
+            mode=modes.Modes.NON_STREAM_INFERENCE,
         )
 
     if test_tflite_streaming or test_tflite_streaming_quantized:
@@ -154,8 +176,8 @@ def evaluate_model(
         utils.convert_model_saved(
             model,
             config,
-            "stream_state_internal",
-            modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
+            folder="stream_state_internal",
+            mode=modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
         )
 
     if test_tf_nonstreaming:
@@ -170,75 +192,86 @@ def evaluate_model(
             accuracy_name="testing_set_metrics.txt",
         )
 
-    tflite_log_strings = []
-    tflite_source_folders = []
-    tflite_output_folders = []
-    tflite_filenames = []
-    tflite_testing_datasets = []
-    tflite_quantize = []
+    tflite_configs = []
 
     if test_tflite_nonstreaming:
-        tflite_log_strings.append("nonstreaming model")
-        tflite_source_folders.append("non_stream")
-        tflite_output_folders.append("tflite_non_stream")
-        tflite_filenames.append("non_stream.tflite")
-        tflite_testing_datasets.append(["testing"])
-        tflite_quantize.append(False)
+        tflite_configs.append(
+            {
+                "log_string": "nonstreaming model",
+                "source_folder": "non_stream",
+                "output_folder": "tflite_non_stream",
+                "filename": "non_stream.tflite",
+                "testing_dataset": "testing",
+                "testing_ambient_dataset": "testing_ambient",
+                "quantize": False,
+            }
+        )
+
+    if test_tflite_nonstreaming_quantized:
+        tflite_configs.append(
+            {
+                "log_string": "quantized nonstreaming model",
+                "source_folder": "non_stream",
+                "output_folder": "tflite_non_stream_quant",
+                "filename": "non_stream_quant.tflite",
+                "testing_dataset": "testing",
+                "testing_ambient_dataset": "testing_ambient",
+                "quantize": True,
+            }
+        )
 
     if test_tflite_streaming:
-        tflite_log_strings.append("streaming model")
-        tflite_source_folders.append("stream_state_internal")
-        tflite_output_folders.append("tflite_stream_state_internal")
-        tflite_filenames.append("stream_state_internal.tflite")
-        tflite_testing_datasets.append(["testing", "testing_ambient"])
-        tflite_quantize.append(False)
+        tflite_configs.append(
+            {
+                "log_string": "streaming model",
+                "source_folder": "stream_state_internal",
+                "output_folder": "tflite_stream_state_internal",
+                "filename": "stream_state_internal.tflite",
+                "testing_dataset": "testing",
+                "testing_ambient_dataset": "testing_ambient",
+                "quantize": False,
+            }
+        )
 
     if test_tflite_streaming_quantized:
-        tflite_log_strings.append("quantized streaming model")
-        tflite_source_folders.append("stream_state_internal")
-        tflite_output_folders.append("tflite_stream_state_internal_quant")
-        tflite_filenames.append("stream_state_internal_quant.tflite")
-        tflite_testing_datasets.append(["testing", "testing_ambient"])
-        tflite_quantize.append(True)
+        tflite_configs.append(
+            {
+                "log_string": "quantized streaming model",
+                "source_folder": "stream_state_internal",
+                "output_folder": "tflite_stream_state_internal_quant",
+                "filename": "stream_state_internal_quant.tflite",
+                "testing_dataset": "testing",
+                "testing_ambient_dataset": "testing_ambient",
+                "quantize": True,
+            }
+        )
 
-    for (
-        log_string,
-        source_folder,
-        output_folder,
-        filename,
-        testing_datasets,
-        quantize,
-    ) in zip(
-        tflite_log_strings,
-        tflite_source_folders,
-        tflite_output_folders,
-        tflite_filenames,
-        tflite_testing_datasets,
-        tflite_quantize,
-    ):
-        logging.info("Converting " + log_string + " to TFLite")
+    for tflite_config in tflite_configs:
+        logging.info("Converting %s to TFLite", tflite_config["log_string"])
 
         utils.convert_saved_model_to_tflite(
             config,
-            data_processor,
-            os.path.join(config["train_dir"], source_folder),
-            os.path.join(config["train_dir"], output_folder),
-            filename,
-            quantize=quantize,
+            audio_processor=data_processor,
+            path_to_model=os.path.join(config["train_dir"], tflite_config["source_folder"]),
+            folder=os.path.join(config["train_dir"], tflite_config["output_folder"]),
+            fname=tflite_config["filename"],
+            quantize=tflite_config["quantize"],
         )
 
-        for dataset in testing_datasets:
-            logging.info(
-                "Testing the TFLite " + log_string + " on the " + dataset + " set"
-            )
-            test.tflite_model_accuracy(
-                config,
-                output_folder,
-                data_processor,
-                data_set=dataset,
-                tflite_model_name=filename,
-                accuracy_name=dataset + "_set_metrics.txt",
-            )
+        logging.info(
+            "Testing the TFLite %s false accept per hour and false rejection rates at various cutoffs.",
+            tflite_config["log_string"],
+        )
+
+        test.tflite_streaming_model_roc(
+            config,
+            tflite_config["output_folder"],
+            data_processor,
+            data_set=tflite_config["testing_dataset"],
+            ambient_set=tflite_config["testing_ambient_dataset"],
+            tflite_model_name=tflite_config["filename"],
+            accuracy_name="tflite_streaming_roc.txt",
+        )
 
 
 if __name__ == "__main__":
@@ -268,6 +301,12 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Save the TFLite nonstreaming model and test on the test datasets",
+    )
+    parser.add_argument(
+        "--test_tflite_nonstreaming_quantized",
+        type=int,
+        default=0,
+        help="Save the TFLite quantized nonstreaming model and test on the test datasets",
     )
     parser.add_argument(
         "--test_tflite_streaming",
@@ -341,16 +380,22 @@ if __name__ == "__main__":
     parser_inception = subparsers.add_parser("inception")
     inception.model_parameters(parser_inception)
 
+    # mixednet model settings
+    parser_mixednet = subparsers.add_parser("mixednet")
+    mixednet.model_parameters(parser_mixednet)
+
     flags, unparsed = parser.parse_known_args()
     if unparsed:
         raise ValueError("Unknown argument: {}".format(unparsed))
 
-    logging.set_verbosity(flags.verbosity)
-
     if flags.model_name == "inception":
         model_module = inception
+    elif flags.model_name == "mixednet":
+        model_module = mixednet
     else:
         raise ValueError("Unknown model type: {}".format(flags.model_name))
+
+    logging.set_verbosity(flags.verbosity)
 
     config = load_config(flags, model_module)
 
@@ -377,8 +422,10 @@ if __name__ == "__main__":
         )
 
         model.load_weights(
-            os.path.join(config["train_dir"], flags.use_weights)
-        ).expect_partial()
+            os.path.join(config["train_dir"], flags.use_weights) + ".weights.h5"
+        )
+
+        logging.info(model.summary())
 
         evaluate_model(
             config,
@@ -386,6 +433,7 @@ if __name__ == "__main__":
             data_processor,
             flags.test_tf_nonstreaming,
             flags.test_tflite_nonstreaming,
+            flags.test_tflite_nonstreaming_quantized,
             flags.test_tflite_streaming,
             flags.test_tflite_streaming_quantized,
         )

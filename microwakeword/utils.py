@@ -20,9 +20,8 @@ import numpy as np
 import tensorflow as tf
 
 from absl import logging
-from typing import Sequence
 
-from microwakeword.layers import modes
+from microwakeword.layers import modes, stream, strided_drop
 
 
 def _set_mode(model, mode):
@@ -35,8 +34,12 @@ def _set_mode(model, mode):
         config = layer.get_config()
         # for every layer set mode, if it has it
         if "mode" in config:
+            assert isinstance(
+                layer,
+                (stream.Stream, strided_drop.StridedDrop, strided_drop.StridedKeep),
+            )
             layer.mode = mode
-            # with any mode of inference - training is False
+        # with any mode of inference - training is False
         if "training" in config:
             layer.training = False
         if mode == modes.Modes.NON_STREAM_INFERENCE:
@@ -46,23 +49,6 @@ def _set_mode(model, mode):
     for layer in model.layers:
         _recursive_set_layer_mode(layer, mode)
     return model
-
-
-def _get_input_output_states(model):
-    """Get input/output states of model with external states."""
-    input_states = []
-    output_states = []
-    for i in range(len(model.layers)):
-        config = model.layers[i].get_config()
-        # input output states exist only in layers with property 'mode'
-        if "mode" in config:
-            input_state = model.layers[i].get_input_state()
-            if input_state not in ([], [None]):
-                input_states.append(model.layers[i].get_input_state())
-            output_state = model.layers[i].get_output_state()
-            if output_state not in ([], [None]):
-                output_states.append(output_state)
-    return input_states, output_states
 
 
 def _copy_weights(new_model, model):
@@ -142,21 +128,6 @@ def _copy_weights(new_model, model):
     return new_model
 
 
-def _flatten_nested_sequence(sequence):
-    """Returns a flattened list of sequence's elements."""
-    if not isinstance(sequence, Sequence):
-        return [sequence]
-    result = []
-    for value in sequence:
-        result.extend(_flatten_nested_sequence(value))
-    return result
-
-
-def _get_state_shapes(model_states):
-    """Converts a nested list of states in to a flat list of their shapes."""
-    return [state.shape for state in _flatten_nested_sequence(model_states)]
-
-
 def save_model_summary(model, path, file_name="model_summary.txt"):
     """Saves model topology/summary in text format.
 
@@ -197,6 +168,7 @@ def convert_to_inference_model(model, input_tensors, mode):
 
     # scope is introduced for simplifiyng access to weights by names
     scope_name = "streaming"
+
     with tf.name_scope(scope_name):
         if not isinstance(model, tf.keras.Model):
             raise ValueError(
@@ -209,34 +181,11 @@ def convert_to_inference_model(model, input_tensors, mode):
                 "got a `Sequential` instance instead:",
                 model,
             )
-        # pylint: disable=protected-access
-        if not model._is_graph_network:
-            raise ValueError(
-                "Expected `model` argument "
-                "to be a functional `Model` instance, "
-                "but got a subclass model instead."
-            )
-        # pylint: enable=protected-access
         model = _set_mode(model, mode)
-        new_model = tf.keras.models.clone_model(
-            model, input_tensors
-        )  # _clone_model(model, input_tensors)
+        new_model = tf.keras.models.clone_model(model, input_tensors)
 
     if mode == modes.Modes.STREAM_INTERNAL_STATE_INFERENCE:
         return _copy_weights(new_model, model)
-    elif mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
-        input_states, output_states = _get_input_output_states(new_model)
-        all_inputs = new_model.inputs + input_states
-        all_outputs = new_model.outputs + output_states
-        new_streaming_model = tf.keras.Model(all_inputs, all_outputs)
-        new_streaming_model.input_shapes = _get_state_shapes(all_inputs)
-        new_streaming_model.output_shapes = _get_state_shapes(all_outputs)
-
-        # inference streaming model with external states
-        # has the same number of weights with
-        # non streaming model so we can use set_weights directly
-        new_streaming_model.set_weights(model.get_weights())
-        return new_streaming_model
     elif mode == modes.Modes.NON_STREAM_INFERENCE:
         new_model.set_weights(model.get_weights())
         return new_model
@@ -250,8 +199,8 @@ def to_streaming_inference(model_non_stream, config, mode):
     Args:
       model_non_stream: trained Keras model non streamable
       config: dictionary containing microWakeWord training configuration
-      mode: it supports Non streaming inference, Streaming inference with internal
-        states, Streaming inference with external states
+      mode: it supports Non streaming inference or Streaming inference with internal
+        states
 
     Returns:
       Keras inference model of inference_type
@@ -265,6 +214,7 @@ def to_streaming_inference(model_non_stream, config, mode):
     else:
         dtype = model_non_stream.input.dtype
 
+    # For streaming, set the batch size to 1
     input_tensors = [
         tf.keras.layers.Input(
             shape=input_data_shape, batch_size=1, dtype=dtype, name="input_audio"
@@ -280,6 +230,7 @@ def to_streaming_inference(model_non_stream, config, mode):
                 "Maximum number of inputs supported is 2 (input_audio and "
                 "cond_features), but got %d inputs" % len(model_non_stream.input)
             )
+
         input_tensors.append(
             tf.keras.layers.Input(
                 shape=config["cond_shape"],
@@ -289,14 +240,22 @@ def to_streaming_inference(model_non_stream, config, mode):
             )
         )
 
-    model_inference = convert_to_inference_model(model_non_stream, input_tensors, mode)
+    # Input tensors must have the same shape as the original
+    if isinstance(model_non_stream.input, (tuple, list)):
+        model_inference = convert_to_inference_model(
+            model_non_stream, input_tensors, mode
+        )
+    else:
+        model_inference = convert_to_inference_model(
+            model_non_stream, input_tensors[0], mode
+        )
+
     return model_inference
 
 
 def model_to_saved(
     model_non_stream,
     config,
-    save_model_path,
     mode=modes.Modes.STREAM_INTERNAL_STATE_INFERENCE,
 ):
     """Convert Keras model to SavedModel.
@@ -308,8 +267,7 @@ def model_to_saved(
     Args:
       model_non_stream: Keras non streamable model
       config: dictionary containing microWakeWord training configuration
-      save_model_path: path where saved model representation with be stored
-      mode: inference mode it can be streaming with external state or non
+      mode: inference mode it can be streaming with internal state or non
         streaming
     """
 
@@ -325,8 +283,7 @@ def model_to_saved(
         # convert non streaming Keras model to Keras streaming model, internal state
         model = to_streaming_inference(model_non_stream, config, mode)
 
-    save_model_summary(model, save_model_path)
-    model.save(save_model_path, include_optimizer=False, save_format="tf")
+    return model
 
 
 def convert_saved_model_to_tflite(
@@ -342,40 +299,48 @@ def convert_saved_model_to_tflite(
         fname: output filename for TFLite file
         quantize: boolean selecting whether to quantize the model
     """
+
+    def representative_dataset_gen():
+        sample_fingerprints, _, _ = audio_processor.get_data(
+            "training", 500, features_length=config["spectrogram_length"]
+        )
+
+        sample_fingerprints[0][
+            0, 0
+        ] = 0.0  # guarantee one pixel is the preprocessor min
+        sample_fingerprints[0][
+            0, 1
+        ] = 26.0  # guarantee one pixel is the preprocessor max
+
+        # for spectrogram in sample_fingerprints:
+        #     yield spectrogram
+
+        stride = config["stride"]
+
+        for spectrogram in sample_fingerprints:
+            assert spectrogram.shape[0] % stride == 0
+
+            for i in range(0, spectrogram.shape[0] - stride, stride):
+                sample = spectrogram[i : i + stride, :].astype(np.float32)
+                yield [sample]
+
+    converter = tf.lite.TFLiteConverter.from_saved_model(path_to_model)
+    converter.optimizations = {tf.lite.Optimize.DEFAULT}
+
+    if quantize:
+        converter.target_spec.supported_ops = {tf.lite.OpsSet.TFLITE_BUILTINS_INT8}
+        converter.inference_input_type = tf.int8
+        converter.inference_output_type = tf.uint8
+        converter.representative_dataset = tf.lite.RepresentativeDataset(
+            representative_dataset_gen
+        )
+
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    sample_fingerprints, _, _ = audio_processor.get_data(
-        "training", 500, features_length=config["spectrogram_length"]
-    )
-
-    sample_fingerprints[0][0, 0] = 0.0  # guarantee one pixel is the preprocessor min
-    sample_fingerprints[0][0, 1] = 26.0  # guarantee one pixel is the preprocessor max
-
-    def representative_dataset_gen():
-        for spectrogram in sample_fingerprints:
-            for i in range(spectrogram.shape[0]):
-                yield [spectrogram[i, :].astype(np.float32)]
-
-    converter = tf.compat.v2.lite.TFLiteConverter.from_saved_model(path_to_model)
-    converter.experimental_new_quantizer = True
-    converter.experimental_enable_resource_variables = True
-    converter.experimental_new_converter = True
-    converter._experimental_variable_quantization = True
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
-    if quantize:
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-
-        converter.inference_type = tf.int8
-        converter.inference_input_type = tf.int8
-        converter.inference_output_type = tf.uint8
-
-        converter.representative_dataset = representative_dataset_gen
-
-    tflite_model = converter.convert()
-    path_to_output = os.path.join(folder, fname)
-    open(path_to_output, "wb").write(tflite_model)
+    with open(os.path.join(folder, fname), "wb") as f:
+        tflite_model = converter.convert()
+        f.write(tflite_model)
 
 
 def convert_model_saved(model, config, folder, mode):
@@ -391,10 +356,24 @@ def convert_model_saved(model, config, folder, mode):
     path_model = os.path.join(config["train_dir"], folder)
     if not os.path.exists(path_model):
         os.makedirs(path_model)
-    try:
-        # Convert trained model to SavedModel
-        model_to_saved(model, config, path_model, mode)
-    except IOError as e:
-        logging.warning("FAILED to write file: %s", e)
-    except (ValueError, AttributeError, RuntimeError, TypeError, AssertionError) as e:
-        logging.warning("WARNING: failed to convert to SavedModel: %s", e)
+
+    # Convert trained model to SavedModel
+    converted_model = model_to_saved(model, config, mode)
+    converted_model.summary()
+
+    assert converted_model.input.shape[0] is not None
+
+    # XXX: Using `converted_model.export(path_model)` results in obscure errors during
+    # quantization, we create an export archive directly instead.
+    export_archive = tf.keras.export.ExportArchive()
+    export_archive.track(converted_model)
+    export_archive.add_endpoint(
+        name="serve",
+        fn=converted_model.call,
+        input_signature=[tf.TensorSpec(shape=converted_model.input.shape, dtype=tf.float32)],
+    )
+    export_archive.write_out(path_model)
+
+    save_model_summary(converted_model, path_model)
+
+    return converted_model

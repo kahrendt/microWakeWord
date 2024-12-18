@@ -5,15 +5,17 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="microwakeword",
-    version="0.0.1",
+    version="0.1.0",
     install_requires=[
         "audiomentations",
         "audio_metadata",
         "datasets",
         "mmap_ninja",
         "numpy",
+        "pymicro-features",
         "pyyaml",
-        "tensorflow>=2.14",
+        "tensorflow>=2.16",
+        "webrtcvad",
     ],
     author="Kevin Ahrendt",
     author_email="kahrendt@gmail.com",
@@ -31,5 +33,5 @@ setuptools.setup(
     ],
     packages=setuptools.find_packages(),
     include_package_data=True,
-    python_requires=">=3.8",
+    python_requires=">=3.10, <3.11",
 )
