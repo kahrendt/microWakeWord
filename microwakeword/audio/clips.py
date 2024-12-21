@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import audio_metadata
 import datasets
 import math
@@ -32,7 +34,7 @@ class Clips:
 
     Args:
         input_directory (str): Path to audio clip files.
-        file_pattern (str): File glob pattern for selecting audio clip files.
+        file_pattern (str | list[str]): File glob pattern(s) for selecting audio clip files.
         min_clip_duration_s (float | None, optional): The minimum clip duration (in seconds). Set to None to disable filtering by minimum clip duration. Defaults to None.
         max_clip_duration_s (float | None, optional): The maximum clip duration (in seconds). Set to None to disable filtering by maximum clip duration. Defaults to None.
         repeat_clip_min_duration_s (float | None, optional): If a clip is shorter than this duration, then it is repeated until it is longer than this duration. Set to None to disable repeating the clip. Defaults to None.
@@ -46,7 +48,7 @@ class Clips:
     def __init__(
         self,
         input_directory: str,
-        file_pattern: str,
+        file_pattern: str | list[str],
         min_clip_duration_s: float | None = None,
         max_clip_duration_s: float | None = None,
         repeat_clip_min_duration_s: float | None = None,
@@ -75,17 +77,24 @@ class Clips:
             self.repeat_clip_min_duration_s = 0.0
 
         self.remove_silence = remove_silence
-
         self.remove_silence_function = remove_silence_webrtc
 
-        paths_to_clips = [str(i) for i in Path(input_directory).glob(file_pattern)]
+        self.input_directory = input_directory
+
+        if isinstance(file_pattern, str):
+            file_pattern = [file_pattern]
+
+        paths_to_clips = []
+
+        for pattern in file_pattern:
+            paths_to_clips.extend([str(i) for i in Path(input_directory).glob(pattern)])
 
         if (self.min_clip_duration_s == 0) and (math.isinf(self.max_clip_duration_s)):
             # No durations specified, so do not filter by length
             filtered_paths = paths_to_clips
         else:
             # Filter audio clips by length
-            if file_pattern.endswith("wav"):
+            if file_pattern[0].endswith("wav"):
                 # If it is a wave file, assume all wave files have the same parameters and filter by file size.
                 # Based on openWakeWord's estimate_clip_duration and filter_audio_paths in data.py, accessed March 2, 2024.
                 with wave.open(paths_to_clips[0], "rb") as input_wav:
