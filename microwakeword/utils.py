@@ -327,6 +327,11 @@ def convert_saved_model_to_tflite(
     converter = tf.lite.TFLiteConverter.from_saved_model(path_to_model)
     converter.optimizations = {tf.lite.Optimize.DEFAULT}
 
+    # Without this flag, the Streaming layer `state` variables are left as float32,
+    # resulting in Quantize and Dequantize operations before and after every `ReadVariable`
+    # and `AssignVariable` operation.
+    converter._experimental_variable_quantization = True
+
     if quantize:
         converter.target_spec.supported_ops = {tf.lite.OpsSet.TFLITE_BUILTINS_INT8}
         converter.inference_input_type = tf.int8
