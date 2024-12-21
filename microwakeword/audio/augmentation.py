@@ -38,6 +38,7 @@ class Augmentation:
         min_jitter_s (float, optional): The minimum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
         max_jitter_s (float, optional): The maximum duration in seconds that the original clip is positioned before the end of the augmented audio. Defaults to 0.0.
         truncate_randomly: (bool, option): If true, the clip is truncated to the specified duration randomly. Otherwise, the start of the clip is truncated.
+        disable_augmentations: (bool, option): If true, augmentations themselves are disabled, only truncation is performed.
     """
 
     def __init__(
@@ -67,8 +68,8 @@ class Augmentation:
         min_jitter_s: float = 0.0,
         max_jitter_s: float = 0.0,
         truncate_randomly: bool = False,
+        disable_augmentations: bool = False,
     ):
-        self.truncate_randomly = truncate_randomly
         ############################################
         # Configure audio duration and positioning #
         ############################################
@@ -88,6 +89,8 @@ class Augmentation:
         #######################
         # Setup augmentations #
         #######################
+        self.disable_augmentations = disable_augmentations
+        self.truncate_randomly = truncate_randomly
 
         # If either the background_paths or impulse_paths are not specified, use an identity transform instead
         def identity_transform(samples, sample_rate):
@@ -220,6 +223,9 @@ class Augmentation:
         Returns:
             numpy.ndarray: The augmented audio of fixed duration.
         """
+        if self.disable_augmentations:
+            return self.create_fixed_size_clip(input_audio)
+
         input_audio = self.add_jitter(input_audio)
         input_audio = self.create_fixed_size_clip(input_audio)
 
