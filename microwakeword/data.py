@@ -352,7 +352,8 @@ class ClipsHandlerWrapperGenerator(object):
 
     def get_mode_duration(self, mode):
         """Function to maintain compatability with the MmapFeatureGenerator class."""
-        return 0.0
+        durations = [clip["audio"]["array"].shape[0] / 16000 for clip in self.spectrogram_generation.clips.split_clips[mode]]
+        return sum(durations)
 
     def get_mode_size(self, mode):
         """Function to maintain compatability with the MmapFeatureGenerator class. This class is intended only for retrieving spectrograms for training."""
