@@ -251,7 +251,7 @@ class Clips:
 
         return self._process_clip(rand_audio_entry["audio"]["array"])
 
-    def random_audio_generator(self, max_clips: int = math.inf, split: str | None = None):
+    def random_audio_generator(self, split: str | None = None, max_clips: int = math.inf):
         """A Python generator that retrieves random audio clips.
 
         Args:
@@ -265,7 +265,8 @@ class Clips:
         while max_clips > 0:
             max_clips -= 1
 
-            yield self.get_random_clip()
+            # TODO: Sampling with replacement isn't good for small datasets
+            yield self.get_random_clip(split=split)
 
     def repeat_clip(self, audio_samples: np.array):
         """Repeats the audio clip until its duration exceeds the minimum specified in the class.
