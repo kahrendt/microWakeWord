@@ -433,9 +433,14 @@ class FeatureHandler(object):
                 )
             elif feature_set["type"] == "clips":
                 clips_handler = Clips(**feature_set["clips_settings"])
-                augmentation_applier = Augmentation(
-                    **feature_set["augmentation_settings"]
-                )
+
+                if feature_set.get("augmentation_settings", None) is not None:
+                    augmentation_applier = Augmentation(
+                        **feature_set["augmentation_settings"]
+                    )
+                else:
+                    augmentation_applier = None
+
                 spectrogram_generator = SpectrogramGeneration(
                     clips_handler,
                     augmentation_applier,
