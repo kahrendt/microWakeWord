@@ -192,7 +192,7 @@ class Clips:
                 train_size=split1[1] + split2[1], seed=random_split_seed
             )
             split_dataset2 = split_dataset1["train"].train_test_split(
-                train_size=split1[1], seed=random_split_seed
+                train_size=split1[1] / (split1[1] + split2[1]), seed=random_split_seed
             )
             dataset_splits[split3[0]] = split_dataset1["test"]
             dataset_splits[split1[0]] = split_dataset2["train"]
