@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import audio_metadata
 import datasets
 import math
@@ -32,13 +34,13 @@ class Clips:
 
     Args:
         input_directory (str): Path to audio clip files.
-        file_pattern (str): File glob pattern for selecting audio clip files.
+        file_pattern (str | list[str]): File glob pattern(s) for selecting audio clip files.
         min_clip_duration_s (float | None, optional): The minimum clip duration (in seconds). Set to None to disable filtering by minimum clip duration. Defaults to None.
         max_clip_duration_s (float | None, optional): The maximum clip duration (in seconds). Set to None to disable filtering by maximum clip duration. Defaults to None.
         repeat_clip_min_duration_s (float | None, optional): If a clip is shorter than this duration, then it is repeated until it is longer than this duration. Set to None to disable repeating the clip. Defaults to None.
         remove_silence (bool, optional): Use webrtcvad to trim non-voice activity in the clip. Defaults to False.
+        random_splits (dict, optional): Specifies how the clips are split into different sets. Only takes effect if `random_split_seed` is set.
         random_split_seed (int | None, optional): The random seed used to split the clips into different sets. Set to None to disable splitting the clips. Defaults to None.
-        split_count (int | float, optional): The percentage/count of clips to be included in the testing and validation sets. Defaults to 0.1.
         trimmed_clip_duration_s: (float | None, optional): The duration of the clips to trim the end of long clips. Set to None to disable trimming. Defaults to None.
         trim_zerios: (bool, optional): If true, any leading and trailling zeros are removed. Defaults to false.
     """
@@ -46,13 +48,19 @@ class Clips:
     def __init__(
         self,
         input_directory: str,
-        file_pattern: str,
+        file_pattern: str | list[str],
         min_clip_duration_s: float | None = None,
         max_clip_duration_s: float | None = None,
         repeat_clip_min_duration_s: float | None = None,
         remove_silence: bool = False,
+        random_splits: dict[str, float] = {
+            "training": 0.8,
+            "testing": 0.1,
+            "validation": 0.1,
+            "testing_ambient": 0,
+            "validation_ambient": 0,
+        },
         random_split_seed: int | None = None,
-        split_count: int | float = 0.1,
         trimmed_clip_duration_s: float | None = None,
         trim_zeros: bool = False,
     ):
@@ -75,17 +83,24 @@ class Clips:
             self.repeat_clip_min_duration_s = 0.0
 
         self.remove_silence = remove_silence
-
         self.remove_silence_function = remove_silence_webrtc
 
-        paths_to_clips = [str(i) for i in Path(input_directory).glob(file_pattern)]
+        self.input_directory = input_directory
+
+        if isinstance(file_pattern, str):
+            file_pattern = [file_pattern]
+
+        paths_to_clips = []
+
+        for pattern in file_pattern:
+            paths_to_clips.extend([str(i) for i in Path(input_directory).glob(pattern)])
 
         if (self.min_clip_duration_s == 0) and (math.isinf(self.max_clip_duration_s)):
             # No durations specified, so do not filter by length
             filtered_paths = paths_to_clips
         else:
             # Filter audio clips by length
-            if file_pattern.endswith("wav"):
+            if file_pattern[0].endswith("wav"):
                 # If it is a wave file, assume all wave files have the same parameters and filter by file size.
                 # Based on openWakeWord's estimate_clip_duration and filter_audio_paths in data.py, accessed March 2, 2024.
                 with wave.open(paths_to_clips[0], "rb") as input_wav:
@@ -142,21 +157,72 @@ class Clips:
             "audio", datasets.Audio(sampling_rate=16000)
         )
 
-        if random_split_seed is not None:
-            train_testvalid = audio_dataset.train_test_split(
-                test_size=2 * split_count, seed=random_split_seed
-            )
-            test_valid = train_testvalid["test"].train_test_split(test_size=0.5)
-            split_dataset = datasets.DatasetDict(
-                {
-                    "train": train_testvalid["train"],
-                    "test": test_valid["test"],
-                    "validation": test_valid["train"],
-                }
-            )
-            self.split_clips = split_dataset
+        dataset_splits = {
+            "training": [],
+            "testing": [],
+            "validation": [],
+            "testing_ambient": [],
+            "validation_ambient": [],
+        }
 
-        self.clips = audio_dataset
+        assigned_splits = [(k, v) for k, v in random_splits.items() if v > 0]
+        assert abs(sum(dict(assigned_splits).values()) - 1.0) < 1e-6
+
+        self.single_split = None
+
+        if len(assigned_splits) == 1:
+            # With a single class, we don't split
+            self.single_split = assigned_splits[0]
+            dataset_splits[self.single_split] = audio_dataset
+        elif random_split_seed is None:
+            raise ValueError("Random split seed must be set to split the dataset")
+
+        if len(assigned_splits) == 2:
+            # With two classes, it's simple
+            split1, split2 = assigned_splits
+            split_dataset = audio_dataset.train_test_split(
+                train_size=split1[1], seed=random_split_seed
+            )
+            dataset_splits[split1[0]] = split_dataset["train"]
+            dataset_splits[split2[0]] = split_dataset["test"]
+        elif len(assigned_splits) == 3:
+            # Three classes requires two splits
+            split1, split2, split3 = assigned_splits
+            split_dataset1 = audio_dataset.train_test_split(
+                train_size=split1[1] + split2[1], seed=random_split_seed
+            )
+            split_dataset2 = split_dataset1["train"].train_test_split(
+                train_size=split1[1] / (split1[1] + split2[1]), seed=random_split_seed
+            )
+            dataset_splits[split3[0]] = split_dataset1["test"]
+            dataset_splits[split1[0]] = split_dataset2["train"]
+            dataset_splits[split2[0]] = split_dataset2["test"]
+        else:
+            raise ValueError(f"Only up to three dataset splits are supported: {assigned_splits}")
+
+        self.split_clips = datasets.DatasetDict(dataset_splits)
+
+    def _process_clip(self, clip_audio):
+        if self.remove_silence:
+            clip_audio = self.remove_silence_function(clip_audio)
+
+        if self.trim_zeros:
+            clip_audio = np.trim_zeros(clip_audio)
+
+        if self.trimmed_clip_duration_s:
+            total_samples = int(self.trimmed_clip_duration_s * 16000)
+            clip_audio = clip_audio[:total_samples]
+
+        return self.repeat_clip(clip_audio)
+
+    def _get_clips_from_split(self, split: str | None = None):
+        if split is None:
+            if self.single_split is None:
+                raise ValueError("`split` must be provided for multi-class Clips")
+
+            split = self.single_split
+
+        return self.split_clips[split]
 
     def audio_generator(self, split: str | None = None, repeat: int = 1):
         """A Python generator that retrieves all loaded audio clips.
@@ -168,50 +234,24 @@ class Clips:
         Yields:
             numpy.ndarray: Array with the audio clip's samples.
         """
-        if split is None:
-            clip_list = self.clips
-        else:
-            clip_list = self.split_clips[split]
+        clip_list = self._get_clips_from_split(split)
+
         for _ in range(repeat):
             for clip in clip_list:
-                clip_audio = clip["audio"]["array"]
+                yield self._process_clip(clip["audio"]["array"])
 
-                if self.remove_silence:
-                    clip_audio = self.remove_silence_function(clip_audio)
-
-                if self.trim_zeros:
-                    clip_audio = np.trim_zeros(clip_audio)
-
-                if self.trimmed_clip_duration_s:
-                    total_samples = int(self.trimmed_clip_duration_s * 16000)
-                    clip_audio = clip_audio[:total_samples]
-
-                clip_audio = self.repeat_clip(clip_audio)
-                yield clip_audio
-
-    def get_random_clip(self):
+    def get_random_clip(self, split: str | None = None):
         """Retrieves a random audio clip.
 
         Returns:
             numpy.ndarray: Array with the audio clip's samples.
         """
-        rand_audio_entry = random.choice(self.clips)
-        clip_audio = rand_audio_entry["audio"]["array"]
+        clip_list = self._get_clips_from_split(split)
+        rand_audio_entry = random.choice(clip_list)
 
-        if self.remove_silence:
-            clip_audio = self.remove_silence_function(clip_audio)
+        return self._process_clip(rand_audio_entry["audio"]["array"])
 
-        if self.trim_zeros:
-            clip_audio = np.trim_zeros(clip_audio)
-
-        if self.trimmed_clip_duration_s:
-            total_samples = int(self.trimmed_clip_duration_s * 16000)
-            clip_audio = clip_audio[:total_samples]
-
-        clip_audio = self.repeat_clip(clip_audio)
-        return clip_audio
-
-    def random_audio_generator(self, max_clips: int = math.inf):
+    def random_audio_generator(self, split: str | None = None, max_clips: int = math.inf):
         """A Python generator that retrieves random audio clips.
 
         Args:
@@ -220,10 +260,13 @@ class Clips:
         Yields:
             numpy.ndarray: Array with the random audio clip's samples.
         """
+        clip_list = self._get_clips_from_split(split)
+
         while max_clips > 0:
             max_clips -= 1
 
-            yield self.get_random_clip()
+            # TODO: Sampling with replacement isn't good for small datasets
+            yield self.get_random_clip(split=split)
 
     def repeat_clip(self, audio_samples: np.array):
         """Repeats the audio clip until its duration exceeds the minimum specified in the class.
