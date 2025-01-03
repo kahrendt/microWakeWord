@@ -346,37 +346,20 @@ class ClipsHandlerWrapperGenerator(object):
         self.penalty_weight = penalty_weight
         self.truncation_strategy = truncation_strategy
 
-        self.augmented_generator = self.spectrogram_generation.spectrogram_generator(
-            random=True
-        )
+        self.augmented_generators = {}
 
     def get_mode_duration(self, mode):
         """Function to maintain compatability with the MmapFeatureGenerator class."""
-        return 0.0
+        durations = [clip["audio"]["array"].shape[0] / 16000 for clip in self.spectrogram_generation.clips.split_clips[mode]]
+        return sum(durations)
 
     def get_mode_size(self, mode):
-        """Function to maintain compatability with the MmapFeatureGenerator class. This class is intended only for retrieving spectrograms for training."""
-        if mode == "training":
-            return len(self.spectrogram_generation.clips.clips)
-        else:
-            return 0
+        """Function to maintain compatability with the MmapFeatureGenerator class."""
+        return len(self.spectrogram_generation.clips.split_clips[mode])
 
-    def get_random_spectrogram(self, mode, features_length, truncation_strategy):
-        """Retrieves a random spectrogram from the specified mode with specified length after truncation.
-
-        Args:
-            mode (str): Specifies the set, but is ignored for this class. It is assumed the spectrograms will be for training.
-            features_length (int): The length of the spectrogram in feature windows.
-            truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
-
-        Returns:
-            numpy.ndarray: A random spectrogram of specified length after truncation.
-        """
-
+    def _truncate_spectrogram(self, spectrogram, features_length, truncation_strategy):
         if truncation_strategy == "default":
             truncation_strategy = self.truncation_strategy
-
-        spectrogram = next(self.augmented_generator)
 
         spectrogram = fixed_length_spectrogram(
             spectrogram,
@@ -391,6 +374,25 @@ class ClipsHandlerWrapperGenerator(object):
 
         return spectrogram
 
+    def get_random_spectrogram(self, mode, features_length, truncation_strategy):
+        """Retrieves a random spectrogram from the specified mode with specified length after truncation.
+
+        Args:
+            mode (str): Specifies the set, but is ignored for this class. It is assumed the spectrograms will be for training.
+            features_length (int): The length of the spectrogram in feature windows.
+            truncation_strategy (str): How to truncate if ``spectrogram`` is too long.
+
+        Returns:
+            numpy.ndarray: A random spectrogram of specified length after truncation.
+        """
+
+        if mode not in self.augmented_generators:
+            self.augmented_generators[mode] = self.spectrogram_generation.spectrogram_generator(split=mode, random=True)
+
+        spectrogram = next(self.augmented_generators[mode])
+
+        return self._truncate_spectrogram(spectrogram, features_length, truncation_strategy)
+
     def get_feature_generator(
         self,
         mode,
@@ -398,8 +400,8 @@ class ClipsHandlerWrapperGenerator(object):
         truncation_strategy="default",
     ):
         """Function to maintain compatability with the MmapFeatureGenerator class."""
-        for x in []:
-            yield x
+        for spectrogram in self.spectrogram_generation.spectrogram_generator(split=mode):
+            yield self._truncate_spectrogram(spectrogram, features_length, truncation_strategy)
 
 
 class FeatureHandler(object):
@@ -433,9 +435,14 @@ class FeatureHandler(object):
                 )
             elif feature_set["type"] == "clips":
                 clips_handler = Clips(**feature_set["clips_settings"])
-                augmentation_applier = Augmentation(
-                    **feature_set["augmentation_settings"]
-                )
+
+                if feature_set.get("augmentation_settings", None) is not None:
+                    augmentation_applier = Augmentation(
+                        **feature_set["augmentation_settings"]
+                    )
+                else:
+                    augmentation_applier = None
+
                 spectrogram_generator = SpectrogramGeneration(
                     clips_handler,
                     augmentation_applier,

@@ -46,19 +46,19 @@ class SpectrogramGeneration:
         self.split_spectrogram_duration_s = split_spectrogram_duration_s
         self.slide_frames = slide_frames
 
-    def get_random_spectrogram(self):
+    def get_random_spectrogram(self, split: str | None = None):
         """Retrieves a random audio clip's spectrogram that is optionally augmented.
 
         Returns:
             numpy.ndarry: 2D spectrogram array for the random (augmented) audio clip.
         """
-        clip = self.clips.get_random_clip()
+        clip = self.clips.get_random_clip(split=split)
         if self.augmenter is not None:
             clip = self.augmenter.augment_clip(clip)
 
         return generate_features_for_clip(clip, self.step_ms)
 
-    def spectrogram_generator(self, random=False, max_clips=None, **kwargs):
+    def spectrogram_generator(self, split: str | None = None, random=False, max_clips=None, **kwargs):
         """A Python generator that retrieves (augmented) spectrograms.
 
         Args:
@@ -70,11 +70,11 @@ class SpectrogramGeneration:
         """
         if random:
             if max_clips is not None:
-                clip_generator = self.clips.random_audio_generator(max_clips=max_clips)
+                clip_generator = self.clips.random_audio_generator(split=split, max_clips=max_clips)
             else:
-                clip_generator = self.clips.random_audio_generator()
+                clip_generator = self.clips.random_audio_generator(split=split)
         else:
-            clip_generator = self.clips.audio_generator(**kwargs)
+            clip_generator = self.clips.audio_generator(split=split, **kwargs)
 
         if self.augmenter is not None:
             augmented_generator = self.augmenter.augment_generator(clip_generator)
