@@ -10,7 +10,7 @@ authors = [
 ]
 description = "A TensorFlow based wake word detection training framework using synthetic sample generation suitable for certain microcontrollers."
 readme = "README.md"
-requires-python = ">=3.10, <3.11"
+requires-python = ">=3.10"
 dynamic = ["dependencies"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -23,5 +23,5 @@ Homepage = "https://github.com/kahrendt/microWakeWord"
 Issues = "https://github.com/kahrendt/microWakeWord/issues"
 
 [tool.black]
-target-version = ["py310"]
+target-version = ["py310", "py311", "py312"]
 exclude = 'generated'
